@@ -1,0 +1,407 @@
+name: HIAHDesktop
+options:
+  bundleIdPrefix: com.aspauldingcode
+  deploymentTarget:
+    iOS: "16.0"  # Minimum iOS version for real device compatibility (matches Info.plist)
+  developmentLanguage: en
+  generateEmptyDirectories: true
+
+schemes:
+  HIAHDesktop:
+    build:
+      targets:
+        HIAHDesktop: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+settings:
+  base:
+    PRODUCT_NAME: HIAHDesktop
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    
+    # Project-level settings (targets can inherit)
+    DEVELOPMENT_TEAM: ""  # Set by user in Xcode
+    CODE_SIGN_STYLE: Automatic
+    
+    # String Catalogs - enable symbol generation (Xcode recommendation)
+    SWIFT_EMIT_LOC_STRINGS: true
+    
+    # User Script Sandboxing - DISABLED for build scripts that need file access
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    BUILD_LIBRARY_FOR_DISTRIBUTION: NO
+  configs:
+    Debug:
+      ONLY_ACTIVE_ARCH: YES
+      STRING_CATALOG_GENERATE_SYMBOLS: YES
+      ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+    Release:
+      ONLY_ACTIVE_ARCH: NO
+      STRING_CATALOG_GENERATE_SYMBOLS: YES
+      ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+
+packages:
+  AltSign:
+    path: vendor/local_packages/AltSign
+  Roxas:
+    path: vendor/local_packages/Roxas
+
+targets:
+  HIAHProcessRunner:
+    type: app-extension
+    platform: iOS
+    
+    attributes:
+      SystemCapabilities:
+        com.apple.ApplicationGroups.iOS:
+          enabled: true
+    
+    info:
+      path: src/extension/Info.plist
+      properties:
+        MinimumOSVersion: "16.0"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.services
+          NSExtensionPrincipalClass: HIAHExtensionHandler
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsFileWithMaxCount: 1
+              NSExtensionActivationSupportsWebURLWithMaxCount: 0
+              NSExtensionActivationSupportsWebPageWithMaxCount: 0
+              NSExtensionActivationSupportsText: false
+              NSExtensionActivationSupportsImageWithMaxCount: 0
+              NSExtensionActivationSupportsMovieWithMaxCount: 0
+    
+    entitlements:
+      path: src/extension/Entitlements.plist
+      properties:
+        com.apple.security.application-groups:
+          - group.com.aspauldingcode.HIAHDesktop
+    
+    sources:
+      # Extension code
+      - path: src/extension/HIAHProcessRunner.m
+      
+      # Signer (used by extension)
+      - path: src/extension/HIAHSigner.h
+      - path: src/extension/HIAHSigner.m
+      
+      # Logging system (shared with extension)
+      - path: src/HIAHDesktop/HIAHLogging.h
+      - path: src/HIAHDesktop/HIAHLogging.m
+      
+      # Mach-O Utils (shared with extension)
+      - path: src/HIAHDesktop/HIAHMachOUtils.h
+      - path: src/HIAHDesktop/HIAHMachOUtils.m
+      
+      # HIAH Hook System (for function interception)
+      - path: src/hooks/HIAHHook.h
+      - path: src/hooks/HIAHHook.c
+      
+      # Dyld Bypass System (for code signature bypass)
+      - path: src/hooks/HIAHDyldBypass.h
+      - path: src/hooks/HIAHDyldBypass.m
+    
+    settings:
+      INFOPLIST_FILE: src/extension/Info.plist
+      GENERATE_INFOPLIST_FILE: NO
+      CODE_SIGN_ENTITLEMENTS: src/extension/Entitlements.plist
+      PRODUCT_BUNDLE_IDENTIFIER: com.aspauldingcode.HIAHDesktop.ProcessRunner
+      PRODUCT_NAME: HIAHProcessRunner
+      
+      # Extension-specific settings
+      SKIP_INSTALL: NO
+      
+      # Build settings
+      HEADER_SEARCH_PATHS:
+        - $(SRCROOT)/src
+        - $(SRCROOT)/src/hooks
+      OTHER_LDFLAGS:
+        - -ObjC
+        - -Wl,-export_dynamic
+      ENABLE_BITCODE: NO
+      
+      # Ensure symbols are exported
+      GCC_SYMBOLS_PRIVATE_EXTERN: NO
+      STRIP_INSTALLED_PRODUCT: NO
+    
+    preBuildScripts:
+      - name: Verify Extension Info.plist
+        script: |
+          set -e
+          INFO_PLIST="${SRCROOT}/src/extension/Info.plist"
+          VERIFY_MARKER="${DERIVED_FILE_DIR}/extension_info_verified"
+          
+          # Check if Info.plist changed since last verification
+          if [ -f "${VERIFY_MARKER}" ] && [ "${INFO_PLIST}" -ot "${VERIFY_MARKER}" ]; then
+            echo "✅ Extension Info.plist already verified (unchanged)"
+            exit 0
+          fi
+          
+          # Verify NSExtension dictionary exists
+          if ! plutil -extract NSExtension raw "${INFO_PLIST}" >/dev/null 2>&1; then
+            echo "❌ ERROR: NSExtension dictionary missing from ${INFO_PLIST}"
+            echo "   This is REQUIRED for the extension to install on iOS devices."
+            exit 1
+          fi
+          
+          # Create marker file
+          mkdir -p "${DERIVED_FILE_DIR}"
+          touch "${VERIFY_MARKER}"
+          echo "✅ Extension Info.plist verified: NSExtension dictionary present"
+        shell: /bin/bash
+        showEnvVars: false
+        outputFiles:
+          - "${DERIVED_FILE_DIR}/extension_info_verified"
+        inputFiles:
+          - "${SRCROOT}/src/extension/Info.plist"
+  
+  HIAHDesktop:
+    type: application
+    platform: iOS
+    
+    attributes:
+      SystemCapabilities:
+        com.apple.ApplicationGroups.iOS:
+          enabled: true
+        com.apple.NetworkExtensions.iOS:
+          enabled: true
+    
+    dependencies:
+      - target: HIAHProcessRunner
+        embed: true
+        link: false
+      - package: AltSign
+        product: AltSign-Static
+      - package: Roxas
+        product: Roxas
+    
+    info:
+      path: src/HIAHDesktop/Info.plist
+      properties:
+        CFBundleDisplayName: HIAH Desktop
+        CFBundleName: HIAH Desktop
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        MinimumOSVersion: "16.0"
+        
+        # Launch screen (fixes zoomed display)
+        UILaunchScreen: {}
+        
+        # Support all orientations (required for proper screen sizing)
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        
+        # Files app integration - expose Documents directory
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default Configuration
+                UISceneDelegateClassName: SceneDelegate
+    
+    entitlements:
+      path: src/HIAHDesktop/HIAHDesktop.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.aspauldingcode.HIAHDesktop
+    
+    sources:
+      # Core
+      - path: src/HIAHKernel.h
+      - path: src/HIAHKernel.m
+      - path: src/HIAHProcess.h
+      - path: src/HIAHProcess.m
+      
+      # Desktop
+      - path: src/HIAHDesktop
+        excludes:
+          - "Info.plist"
+      
+      # HIAH LoginWindow (integrated into Desktop)
+      - path: src/HIAHLoginWindow/UI
+        excludes:
+          - "LoginWindowApp.swift"  # Exclude @main - HIAHDesktop has its own main
+      - path: src/HIAHLoginWindow/Auth
+      - path: src/HIAHLoginWindow/VPN/VPNManager.swift
+      - path: src/HIAHLoginWindow/VPN/EMProxyBridge.h
+      - path: src/HIAHLoginWindow/VPN/EMProxyBridge.m
+      - path: src/HIAHLoginWindow/VPN/HIAHVPNManager.h
+      - path: src/HIAHLoginWindow/VPN/HIAHVPNManager.m
+      - path: src/HIAHLoginWindow/VPN/MinimuxerBridge.h
+      - path: src/HIAHLoginWindow/VPN/MinimuxerBridge.m
+      - path: src/HIAHLoginWindow/Signing
+      - path: src/HIAHLoginWindow/Refresh
+      - path: src/HIAHLoginWindow/HIAHLoginWindow-Bridging-Header.h
+      
+      # Utilities
+      - path: src/HIAHDesktop/HIAHMachOUtils.h
+      - path: src/HIAHDesktop/HIAHMachOUtils.m
+      
+      # Swift Bridge
+      - path: src/HIAHDesktop/HIAHSwiftBridge.swift
+      
+      # Hooks
+      - path: src/hooks
+      
+      # Window Server
+      - path: src/HIAHWindowServer
+      
+      # Top (Process Manager)
+      - path: src/HIAHTop
+        excludes:
+          - "Info.plist"
+          - "main.m"
+      
+      # Sample Apps (Include in main target for in-process execution)
+      - path: src/SampleApps
+        excludes:
+          - "**/Info.plist"
+      
+      # HIAHTerminal (Include in main target)
+      - path: src/HIAHTerminal
+        excludes:
+          - "Info.plist"
+    
+    settings:
+      INFOPLIST_FILE: src/HIAHDesktop/Info.plist
+      CODE_SIGN_ENTITLEMENTS: src/HIAHDesktop/HIAHDesktop.entitlements
+      PRODUCT_BUNDLE_IDENTIFIER: com.aspauldingcode.HIAHDesktop
+      
+      # Deployment target - minimum iOS version for device compatibility
+      IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+      
+      # LoginWindow bridging (integrated)
+      SWIFT_OBJC_BRIDGING_HEADER: $(SRCROOT)/src/HIAHLoginWindow/HIAHLoginWindow-Bridging-Header.h
+      
+      # Inherit from project settings (don't override)
+      # CODE_SIGN_STYLE and DEVELOPMENT_TEAM come from project level
+      
+      # Build settings
+      HEADER_SEARCH_PATHS:
+        - $(SRCROOT)/src
+        - $(SRCROOT)/src/**
+        - $(SRCROOT)/src/HIAHLoginWindow/VPN
+        - $(SRCROOT)/vendor/sidestore/include
+        # SPM package headers (for bridging header access)
+        - $(SRCROOT)/vendor/local_packages/AltSign/AltSign/include
+        - $(SRCROOT)/vendor/local_packages/Roxas/Sources/Roxas/include
+        - $(SRCROOT)/vendor/local_packages/Roxas/Sources/Roxas/include/Roxas
+      
+      LIBRARY_SEARCH_PATHS:
+        - $(SRCROOT)/vendor/sidestore/lib
+      
+      OTHER_LDFLAGS:
+        - -lz
+        - -ObjC
+        - -lem_proxy-sim
+        - -lminimuxer-sim
+        # Suppress linker warnings about version mismatches
+        # These warnings occur because prebuilt libraries contain many object files (.o),
+        # each checked individually. Libraries built with iOS 26.1 SDK are backward compatible with iOS 16.0+.
+        - -Wl,-w
+      
+      OTHER_LDFLAGS[sdk=iphoneos*]:
+        - -lz
+        - -ObjC
+        - -lem_proxy-ios
+        - -lminimuxer-ios
+        # Suppress linker warnings about version mismatches
+        # These warnings occur because prebuilt libraries contain many object files (.o),
+        # each checked individually. Libraries built with iOS 26.1 SDK are backward compatible with iOS 16.0+.
+        - -Wl,-w
+      
+      ENABLE_BITCODE: NO
+      
+      # String Catalogs - enable symbol generation (Xcode recommendation)
+      SWIFT_EMIT_LOC_STRINGS: true
+      
+      # Disable module interface (requires BUILD_LIBRARY_FOR_DISTRIBUTION)
+      SWIFT_EMIT_MODULE_INTERFACE: false
+      BUILD_LIBRARY_FOR_DISTRIBUTION: NO
+    
+    postCompileScripts:
+      - name: Bundle Apps
+        script: |
+          set -e
+          echo "🚀 Bundle Apps Script Running..."
+          
+          APP_BUNDLE="${BUILT_PRODUCTS_DIR}/HIAHDesktop.app"
+          BUNDLED_APPS_DIR="${APP_BUNDLE}/BundledApps"
+          
+          echo "📦 Bundling apps into: ${BUNDLED_APPS_DIR}"
+          
+          # Create BundledApps directory
+          mkdir -p "${BUNDLED_APPS_DIR}"
+          
+          # Bundle HIAHTop
+          if [ -d "${SRCROOT}/src/HIAHTop" ]; then
+              mkdir -p "${BUNDLED_APPS_DIR}/HIAHTop.app"
+              cp "${SRCROOT}/src/HIAHTop/"*.m "${SRCROOT}/src/HIAHTop/"*.h "${BUNDLED_APPS_DIR}/HIAHTop.app/" 2>/dev/null || true
+              cp "${SRCROOT}/src/HIAHTop/Info.plist" "${BUNDLED_APPS_DIR}/HIAHTop.app/"
+              echo "✓ Bundled HIAHTop.app"
+          fi
+          
+          # Bundle HIAHInstaller
+          if [ -d "${SRCROOT}/src/HIAHInstaller" ]; then
+              mkdir -p "${BUNDLED_APPS_DIR}/HIAHInstaller.app"
+              cp "${SRCROOT}/src/HIAHInstaller/"*.m "${SRCROOT}/src/HIAHInstaller/"*.h "${BUNDLED_APPS_DIR}/HIAHInstaller.app/" 2>/dev/null || true
+              cp "${SRCROOT}/src/HIAHInstaller/Info.plist" "${BUNDLED_APPS_DIR}/HIAHInstaller.app/"
+              echo "✓ Bundled HIAHInstaller.app"
+          fi
+          
+          # Bundle Sample Apps
+          for app in Calculator Notes Weather Timer Canvas; do
+              if [ -d "${SRCROOT}/src/SampleApps/${app}" ]; then
+                  mkdir -p "${BUNDLED_APPS_DIR}/${app}.app"
+                  cp "${SRCROOT}/src/SampleApps/${app}/"*.swift "${BUNDLED_APPS_DIR}/${app}.app/" 2>/dev/null || true
+                  cp "${SRCROOT}/src/SampleApps/${app}/Info.plist" "${BUNDLED_APPS_DIR}/${app}.app/"
+                  echo "✓ Bundled ${app}.app"
+              fi
+          done
+          
+          # Bundle HIAHTerminal
+          if [ -d "${SRCROOT}/src/HIAHTerminal" ]; then
+              mkdir -p "${BUNDLED_APPS_DIR}/HIAHTerminal.app"
+              cp "${SRCROOT}/src/HIAHTerminal/"*.swift "${SRCROOT}/src/HIAHTerminal/"*.m "${SRCROOT}/src/HIAHTerminal/"*.h "${BUNDLED_APPS_DIR}/HIAHTerminal.app/" 2>/dev/null || true
+              cp "${SRCROOT}/src/HIAHTerminal/Info.plist" "${BUNDLED_APPS_DIR}/HIAHTerminal.app/"
+              echo "✓ Bundled HIAHTerminal.app"
+          fi
+          
+          echo "✅ Finished bundling apps!"
+        shell: /bin/bash
+        showEnvVars: false
+        runOnlyWhenInstalling: false
+        outputFiles:
+          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/HIAHTop.app"
+          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/HIAHInstaller.app"
+          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/Calculator.app"
+          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/Notes.app"
+          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/Weather.app"
+          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/Timer.app"
+          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/Canvas.app"
+          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/HIAHTerminal.app"
+        inputFiles:
+          - "${SRCROOT}/src/HIAHTop/Info.plist"
+          - "${SRCROOT}/src/HIAHInstaller/Info.plist"
+          - "${SRCROOT}/src/SampleApps/Calculator/Info.plist"
+          - "${SRCROOT}/src/SampleApps/Notes/Info.plist"
+          - "${SRCROOT}/src/SampleApps/Weather/Info.plist"
+          - "${SRCROOT}/src/SampleApps/Timer/Info.plist"
+          - "${SRCROOT}/src/SampleApps/Canvas/Info.plist"
+          - "${SRCROOT}/src/HIAHTerminal/Info.plist"

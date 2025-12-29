@@ -1,0 +1,16 @@
+
+- (void)updateStatusIndicators {
+    BOOL vpnActive = [HIAHVPNManager sharedManager].isVPNActive;
+    
+    if (vpnActive) {
+        self.vpnStatusLabel.text = @"VPN: ON";
+        self.vpnStatusLabel.textColor = [UIColor greenColor];
+        self.jitStatusLabel.text = @"JIT: READY";
+        self.jitStatusLabel.textColor = [UIColor cyanColor];
+    } else {
+        self.vpnStatusLabel.text = @"VPN: OFF";
+        self.vpnStatusLabel.textColor = [UIColor grayColor];
+        self.jitStatusLabel.text = @"JIT: OFF";
+        self.jitStatusLabel.textColor = [UIColor grayColor];
+    }
+}

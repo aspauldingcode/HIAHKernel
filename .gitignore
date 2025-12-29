@@ -1,0 +1,66 @@
+# Xcode (generated)
+*.xcodeproj/
+*.xcworkspace/
+*.xcuserdata
+*.xcuserstate
+DerivedData/
+
+# Nix
+result
+result-*
+
+# Vendor binaries (download separately)
+vendor/sidestore/lib/*.a
+
+# Vendor generated files
+vendor/local_packages/
+vendor/sidestore/SwiftPackages/
+# Ignore everything in include directory (including symlink named '*')
+vendor/sidestore/include/*
+# But track actual source header files
+!vendor/sidestore/include/*.h
+!vendor/sidestore/include/*.swift
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Build artifacts
+build/
+.build/
+*.o
+*.a
+*.dylib
+*.framework
+*.xcframework
+*.swiftmodule
+*.swiftdoc
+*.swiftsourceinfo
+*.pcm
+*.d
+*.dia
+*.scan
+
+# Logging
+*.log
+
+# References
+source0/
+source1/
+source2/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.snippet

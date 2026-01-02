@@ -42,16 +42,19 @@ HIAH Kernel provides the core mechanisms to spawn, manage, and communicate with 
 Copy the following files into your project:
 
 ```
-src/
-├── HIAHKernel.h
-├── HIAHKernel.m
-├── HIAHProcess.h
-├── HIAHProcess.m
-└── hooks/
-    ├── litehook.h
-    ├── litehook.c
-    ├── HIAHGuestHooks.h
-    └── HIAHGuestHooks.m
+src/HIAHKernel/
+├── Public/
+│   ├── HIAHKernel.h
+│   ├── HIAHProcess.h
+│   └── HIAHLogging.h
+└── Core/
+    ├── HIAHKernel.m
+    ├── HIAHProcess.m
+    ├── Hooks/
+    │   ├── HIAHHook.c
+    │   └── HIAHDyldBypass.m
+    └── Logging/
+        └── HIAHLogging.m
 ```
 
 ## Quick Start

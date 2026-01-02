@@ -1,8 +1,8 @@
 # HIAH Kernel
 
-**House-in-a-House kernel for running iOS applications inside iOS.**
+**iOS Virtual Kernel Library for running dynamic binaries inside standard iOS apps.**
 
-Virtual process management, window server, and filesystem for multi-app execution on iPhone.
+HIAHKernel is a reusable **library dependency** that enables applications (like Wawona) to spawn and manage multiple processes within their own sandbox, bypassing single-executable restrictions via `.dylib` loading.
 
 ---
 
@@ -28,12 +28,11 @@ open HIAHDesktop.xcodeproj
 
 ## ✨ Features
 
-- 🖥️ **Window Server** – Multi-app windowing on iOS
-- ⚙️ **Process Manager** – Virtual process table (HIAH Top)
-- 📦 **App Installer** – Install .ipa files (HIAH Installer)
-- 🗂️ **Virtual Filesystem** – Unix-like structure (`/bin`, `/usr`, `/Applications`)
-- 🔧 **HIAH Kernel** – Process spawning via NSExtension
-- 📱 **Files.app Integration** – Full filesystem visible in iOS Files app
+- 🧱 **Reusable Library** – Clean API for embedding dynamic execution logic
+- ⚙️ **Virtual Kernel** – Process table, memory management, and signal handling
+- 🚀 **Binary Loading** – Execute arbitrary code via `.dylib` dynamic loading
+- 🔌 **NSExtension Support** – Isolated process spawning using App Extensions
+- 📡 **IPC Layer** – Unix sockets for standard Input/Output redirection
 
 ---
 
@@ -52,8 +51,10 @@ open HIAHDesktop.xcodeproj
 
 ## 📖 Documentation
 
-- [BUILD.md](BUILD.md) – Complete build guide
-- [docs/](docs/) – Technical documentation
+- [HIAH Kernel Library](docs/HIAHKernel.md) – **Main Library Documentation**
+- [BUILD.md](BUILD.md) – Build instructions
+- [Architecture](docs/Architecture-and-Roadmap.md) – Internal design
+
 
 ---
 

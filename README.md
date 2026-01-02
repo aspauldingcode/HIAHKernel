@@ -51,7 +51,8 @@ open HIAHDesktop.xcodeproj
 
 ## 📖 Documentation
 
-- [HIAH Kernel Library](docs/HIAHKernel.md) – **Main Library Documentation**
+- [**Integration Guide**](docs/Integration.md) – 👈 **Start Here if adding to another app**
+- [HIAH Kernel Library](docs/HIAHKernel.md) – Main API Documentation
 - [BUILD.md](BUILD.md) – Build instructions
 - [Architecture](docs/Architecture-and-Roadmap.md) – Internal design
 

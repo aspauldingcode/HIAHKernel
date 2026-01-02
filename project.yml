@@ -61,7 +61,10 @@ targets:
     type: framework
     platform: iOS
     sources:
-      - path: src/HIAHKernel
+      - path: src/HIAHKernel/Public
+        headerVisibility: public
+      - path: src/HIAHKernel/Core
+        headerVisibility: project
     settings:
       PRODUCT_NAME: HIAHKernel
       PRODUCT_BUNDLE_IDENTIFIER: com.aspauldingcode.HIAHKernel

@@ -3,7 +3,7 @@
  * HIAH LoginWindow - EM Proxy Bridge
  *
  * Bridge to em_proxy Rust library for VPN loopback functionality.
- * em_proxy creates a UDP socket that WireGuard connects to, enabling
+ * em_proxy creates a UDP socket that LocalDevVPN connects to, enabling
  * JIT via the debugger attachment flow.
  *
  * Based on SideStore (AGPLv3)
@@ -46,12 +46,13 @@ static dispatch_queue_t gEMProxyQueue = nil;
 }
 
 + (int)startVPNWithBindAddress:(NSString *)bindAddress {
-    __block int result = 0;
+    __block int result = -999;  // Sentinel value meaning "not handled yet"
+    __block BOOL shouldStart = NO;
     
     dispatch_sync(gEMProxyQueue, ^{
         // Already running - success
         if (gEMProxyRunning) {
-            HIAHLogEx(HIAH_LOG_DEBUG, @"EMProxy", @"em_proxy already running");
+            HIAHLogEx(HIAH_LOG_DEBUG, @"EMProxy", @"em_proxy already running, isRunning will return YES");
             result = 0;
             return;
         }
@@ -63,14 +64,14 @@ static dispatch_queue_t gEMProxyQueue = nil;
             return;
         }
         
+        // Mark as starting and signal to proceed
         gEMProxyStarting = YES;
+        shouldStart = YES;
     });
     
-    // If already handled, return
-    if (gEMProxyRunning || result == 0) {
-        dispatch_sync(gEMProxyQueue, ^{
-            gEMProxyStarting = NO;
-        });
+    // If already handled, return early
+    if (!shouldStart) {
+        HIAHLogEx(HIAH_LOG_DEBUG, @"EMProxy", @"Early return with result: %d", result);
         return result;
     }
     
@@ -88,7 +89,7 @@ static dispatch_queue_t gEMProxyQueue = nil;
             // Non-negative value indicates success
             gEMProxyHandle = startResult;
             gEMProxyRunning = YES;
-            HIAHLogEx(HIAH_LOG_INFO, @"EMProxy", @"✅ em_proxy started (result: %d)", startResult);
+            HIAHLogEx(HIAH_LOG_INFO, @"EMProxy", @"✅ em_proxy started successfully (result: %d), isRunning will return YES", startResult);
             result = 0;
         } else {
             HIAHLogEx(HIAH_LOG_ERROR, @"EMProxy", @"❌ Failed to start em_proxy: %d", startResult);
@@ -96,6 +97,7 @@ static dispatch_queue_t gEMProxyQueue = nil;
         }
     });
     
+    HIAHLogEx(HIAH_LOG_INFO, @"EMProxy", @"startVPNWithBindAddress returning: %d", result);
     return result;
 }
 
@@ -134,7 +136,7 @@ static dispatch_queue_t gEMProxyQueue = nil;
     int result = test_emotional_damage((int)timeout);
     
     if (result == 0) {
-        HIAHLogEx(HIAH_LOG_DEBUG, @"EMProxy", @"WireGuard connection OK");
+        HIAHLogEx(HIAH_LOG_DEBUG, @"EMProxy", @"LocalDevVPN connection OK");
     }
     // Don't log failures - too noisy
     

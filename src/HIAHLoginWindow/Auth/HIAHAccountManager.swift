@@ -179,6 +179,8 @@ class HIAHAccountManager: NSObject {
         } catch {
             print("[Account] Session validation failed: \(error)")
             clearSession()
+            // Post notification that authentication failed - desktop should show login
+            NotificationCenter.default.post(name: NSNotification.Name("HIAHAccountSessionValidationFailed"), object: nil)
         }
     }
     

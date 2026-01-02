@@ -32,7 +32,7 @@ enum AltSignError: Error, LocalizedError {
         case .provisioningFailed(let msg): return "Provisioning profile error: \(msg)"
         case .signingFailed(let msg): return "Signing failed: \(msg)"
         case .invalidAnisetteData: return "Failed to fetch Anisette data from all servers"
-        case .anisetteServerTimeout: return "Anisette servers timed out. If using WireGuard VPN, try disabling it temporarily to sign in."
+        case .anisetteServerTimeout: return "Anisette servers timed out. If using LocalDevVPN, try disabling it temporarily to sign in."
         case .networkError(let error): return "Network error: \(error.localizedDescription)"
         }
     }

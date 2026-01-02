@@ -17,7 +17,7 @@ NS_ASSUME_NONNULL_BEGIN
 typedef NS_ENUM(NSInteger, HIAHVPNStatus) {
     HIAHVPNStatusDisconnected = 0,  // No VPN active
     HIAHVPNStatusConnected = 1,     // VPN is active
-    HIAHVPNStatusNeedsSetup = 2     // User needs to configure WireGuard
+    HIAHVPNStatusNeedsSetup = 2     // User needs to configure LocalDevVPN
 };
 
 /// Notification posted when VPN status changes
@@ -29,7 +29,7 @@ extern NSNotificationName const HIAHVPNStatusDidChangeNotification;
  * Handles:
  * - em_proxy lifecycle
  * - VPN status monitoring
- * - WireGuard configuration
+ * - LocalDevVPN configuration
  * - Bypass coordinator updates
  */
 @interface HIAHVPN : NSObject
@@ -65,22 +65,13 @@ extern NSNotificationName const HIAHVPNStatusDidChangeNotification;
 /// Reset setup (for debugging/re-setup)
 - (void)resetSetup;
 
-#pragma mark - WireGuard Config
+#pragma mark - LocalDevVPN
 
-/// Save WireGuard config file to Documents
-- (nullable NSString *)saveConfigFile;
+/// Open LocalDevVPN app
+- (void)openLocalDevVPN;
 
-/// Get config file URL for sharing
-- (NSURL *)configFileURL;
-
-/// Copy config to clipboard
-- (void)copyConfigToClipboard;
-
-/// Open WireGuard app
-- (void)openWireGuard;
-
-/// Open App Store to install WireGuard
-- (void)installWireGuard;
+/// Open App Store to install LocalDevVPN
+- (void)installLocalDevVPN;
 
 #pragma mark - Status
 

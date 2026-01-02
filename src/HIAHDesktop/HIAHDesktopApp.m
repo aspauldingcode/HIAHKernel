@@ -20,7 +20,8 @@
 #import "HIAHeDisplayMode.h"
 #import "../HIAHLoginWindow/Signing/HIAHSignatureBypass.h"
 #import "../HIAHLoginWindow/VPN/HIAHVPNStateMachine.h"
-#import "../HIAHLoginWindow/VPN/WireGuard/HIAHVPNSetupViewController.h"
+#import "../HIAHLoginWindow/VPN/HIAHVPNReminderViewController.h"
+#import "../HIAHLoginWindow/VPN/LocalDevVPN/HIAHLocalDevVPNSetupViewController.h"
 #import <CarPlay/CarPlay.h>
 #import <UIKit/UIKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
@@ -779,7 +780,7 @@
   [alert addAction:[UIAlertAction actionWithTitle:@"Sign Out"
                                             style:UIAlertActionStyleDestructive
                                           handler:^(UIAlertAction * _Nonnull action) {
-    [self handleSignOut];
+    [self handleSignOutWithWarning];
   }]];
   
   [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
@@ -793,6 +794,44 @@
   }
   
   [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)handleSignOutWithWarning {
+  // Check if VPN is active
+  HIAHVPNStateMachine *vpnSM = [HIAHVPNStateMachine shared];
+  BOOL vpnActive = [vpnSM isConnected];
+  
+  if (vpnActive) {
+    // Warn user to disable VPN before signing out
+    UIAlertController *warning = [UIAlertController
+        alertControllerWithTitle:@"VPN Active"
+                         message:@"HIAH-VPN is currently enabled.\n\n⚠️ Please disable it in LocalDevVPN before signing out.\n\nYou'll need to disable it again before signing back in."
+                  preferredStyle:UIAlertControllerStyleAlert];
+    
+    [warning addAction:[UIAlertAction actionWithTitle:@"Open Settings"
+                                                 style:UIAlertActionStyleDefault
+                                               handler:^(UIAlertAction * _Nonnull action) {
+      NSURL *settingsURL = [NSURL URLWithString:UIApplicationOpenSettingsURLString];
+      if (settingsURL) {
+        [[UIApplication sharedApplication] openURL:settingsURL options:@{} completionHandler:nil];
+      }
+    }]];
+    
+    [warning addAction:[UIAlertAction actionWithTitle:@"Sign Out Anyway"
+                                                 style:UIAlertActionStyleDestructive
+                                               handler:^(UIAlertAction * _Nonnull action) {
+      [self handleSignOut];
+    }]];
+    
+    [warning addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                 style:UIAlertActionStyleCancel
+                                               handler:nil]];
+    
+    [self presentViewController:warning animated:YES completion:nil];
+  } else {
+    // VPN not active - proceed with sign out
+    [self handleSignOut];
+  }
 }
 
 - (void)handleSignOut {
@@ -1626,7 +1665,8 @@
 @interface AppDelegate
     : UIResponder <UIApplicationDelegate, CPApplicationDelegate,
                    HIAHeDisplayModeDelegate, HIAHLoginViewControllerDelegate,
-                   HIAHVPNSetupDelegate>
+                   HIAHVPNReminderDelegate,
+                   HIAHLocalDevVPNSetupDelegate>
 #pragma clang diagnostic pop
 @property(strong, nonatomic)
     NSMutableDictionary<NSValue *, UIWindow *> *windowsByScreen;
@@ -1671,34 +1711,90 @@
     return;
   }
   
-  // Start VPN state machine
-  [[HIAHVPNStateMachine shared] sendEvent:HIAHVPNEventStart];
+  // Start VPN state machine (starts em_proxy)
+  HIAHVPNStateMachine *vpnSM = [HIAHVPNStateMachine shared];
+  [vpnSM sendEvent:HIAHVPNEventStart];
   
-  // Check if VPN setup is needed
-  if ([HIAHVPNSetupViewController isSetupNeeded]) {
-    NSLog(@"[AppDelegate] 📱 VPN setup needed - showing setup wizard");
+  // Always check VPN state after login (even if it was connected before)
+  // This ensures we detect the current state, not a stale cached state
+  
+  // Wait a moment for state machine to update, then check
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // Check VPN state - determines what screen to show
+    NSInteger vpnState = [HIAHVPNReminderViewController checkVPNState];
     
     // Get the root view controller to present from
     UIViewController *rootVC = windowScene.windows.firstObject.rootViewController;
     UIViewController *presenterVC = rootVC.presentedViewController ?: rootVC;
     
-    // Present the VPN setup flow
-    [HIAHVPNSetupViewController presentFrom:presenterVC delegate:self];
-  } else {
-    NSLog(@"[AppDelegate] ✅ VPN ready - transitioning to Desktop");
-    [self proceedToDesktopAfterLogin];
-  }
+    switch (vpnState) {
+      case 0: // HIAHVPNCheckResultConnected
+        NSLog(@"[AppDelegate] ✅ VPN connected - proceeding to Desktop");
+        [self proceedToDesktopAfterLogin];
+        break;
+        
+      case 1: // HIAHVPNCheckResultNeedsReminder
+        NSLog(@"[AppDelegate] 📱 VPN setup done but disconnected - showing reminder");
+        [HIAHVPNReminderViewController presentFrom:presenterVC delegate:self];
+        break;
+        
+      case 2: // HIAHVPNCheckResultNeedsSetup
+        NSLog(@"[AppDelegate] 🔧 VPN never configured - showing full setup wizard");
+        [HIAHLocalDevVPNSetupViewController presentSetupFromViewController:presenterVC delegate:self];
+        break;
+        
+      default:
+        NSLog(@"[AppDelegate] ⚠️ Unknown VPN state %ld - proceeding anyway", (long)vpnState);
+        [self proceedToDesktopAfterLogin];
+        break;
+    }
+  });
 }
 
-#pragma mark - HIAHVPNSetupDelegate
+// HIAHVPNSetupDelegate removed - using HIAHLocalDevVPNSetupDelegate instead
 
-- (void)vpnSetupDidComplete {
-  NSLog(@"[AppDelegate] ✅ VPN setup completed - transitioning to Desktop");
+#pragma mark - HIAHVPNReminderDelegate
+
+- (void)vpnReminderDidConnect {
+  NSLog(@"[AppDelegate] ✅ VPN connected from reminder - transitioning to Desktop");
   [self proceedToDesktopAfterLogin];
 }
 
-- (void)vpnSetupDidCancel {
-  NSLog(@"[AppDelegate] ⏭️ VPN setup cancelled - transitioning to Desktop anyway");
+- (void)vpnReminderDidSkip {
+  NSLog(@"[AppDelegate] ⏭️ VPN reminder skipped - transitioning to Desktop anyway");
+  NSLog(@"[AppDelegate] ⚠️ Some features (JIT, unsigned apps) may not work without VPN");
+  [self proceedToDesktopAfterLogin];
+}
+
+- (void)vpnReminderRequestsFullSetup {
+  NSLog(@"[AppDelegate] 🔧 User requested full VPN setup - showing wizard");
+  
+  UIWindowScene *windowScene = (UIWindowScene *)[UIApplication sharedApplication]
+                             .connectedScenes.anyObject;
+  if (!windowScene) return;
+  
+  UIViewController *rootVC = windowScene.windows.firstObject.rootViewController;
+  UIViewController *presenterVC = rootVC.presentedViewController ?: rootVC;
+  
+  // If we have a presented VC, dismiss it first then present setup
+  if (rootVC.presentedViewController) {
+    [rootVC dismissViewControllerAnimated:YES completion:^{
+      [HIAHLocalDevVPNSetupViewController presentSetupFromViewController:rootVC delegate:self];
+    }];
+  } else {
+    [HIAHLocalDevVPNSetupViewController presentSetupFromViewController:presenterVC delegate:self];
+  }
+}
+
+#pragma mark - HIAHLocalDevVPNSetupDelegate
+
+- (void)localDevVPNSetupDidComplete {
+  NSLog(@"[AppDelegate] ✅ LocalDevVPN setup completed - transitioning to Desktop");
+  [self proceedToDesktopAfterLogin];
+}
+
+- (void)localDevVPNSetupDidCancel {
+  NSLog(@"[AppDelegate] ⏭️ LocalDevVPN setup cancelled - transitioning to Desktop anyway");
   NSLog(@"[AppDelegate] ⚠️ Some features (JIT, unsigned apps) may not work without VPN");
   [self proceedToDesktopAfterLogin];
 }
@@ -1772,6 +1868,12 @@
   self.desktopsByScreen = [NSMutableDictionary dictionary];
   self.managedScreens = [NSMutableSet set];
 
+  // Listen for session validation failures - show login screen if session expires
+  [[NSNotificationCenter defaultCenter] addObserver:self
+                                           selector:@selector(handleSessionValidationFailed:)
+                                               name:@"HIAHAccountSessionValidationFailed"
+                                             object:nil];
+  
   // Listen for process exit notifications
   [[NSNotificationCenter defaultCenter]
       addObserver:self
@@ -1795,6 +1897,43 @@
   [self.window makeKeyAndVisible];
 
   return YES;
+}
+
+- (void)handleSessionValidationFailed:(NSNotification *)notification {
+  NSLog(@"[AppDelegate] ⚠️ Session validation failed - user must re-authenticate");
+  
+  // Dismiss desktop and show login screen
+  dispatch_async(dispatch_get_main_queue(), ^{
+    // Find the main window scene
+    UIWindowScene *mainScene = nil;
+    for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+      if ([scene isKindOfClass:[UIWindowScene class]]) {
+        UIWindowScene *ws = (UIWindowScene *)scene;
+        if (ws.screen == [UIScreen mainScreen] || mainScene == nil) {
+          mainScene = ws;
+        }
+      }
+    }
+    
+    if (mainScene) {
+      // Get SceneDelegate to show login gate
+      id sceneDelegate = mainScene.delegate;
+      if (sceneDelegate && [sceneDelegate respondsToSelector:@selector(showLoginGate:appDelegate:)]) {
+        [sceneDelegate performSelector:@selector(showLoginGate:appDelegate:) withObject:mainScene withObject:self];
+        NSLog(@"[AppDelegate] ✅ Login gate shown after session validation failure");
+      } else {
+        // Fallback: Create new login window
+        UIWindow *loginWindow = [[UIWindow alloc] initWithWindowScene:mainScene];
+        HIAHLoginViewController *loginVC = [[HIAHLoginViewController alloc] init];
+        loginVC.delegate = self;
+        loginWindow.rootViewController = loginVC;
+        [loginWindow makeKeyAndVisible];
+        NSLog(@"[AppDelegate] ✅ Login window shown after session validation failure");
+      }
+    } else {
+      NSLog(@"[AppDelegate] ⚠️ Could not find window scene to show login");
+    }
+  });
 }
 
 - (void)handleProcessExited:(NSNotification *)notification {
@@ -2017,11 +2156,63 @@
 // MARK: - Authentication Check
 
 - (BOOL)checkAuthentication {
-  // Check for stored session (set by HIAHAccountManager)
-  // HIAHAccountManager stores:
-  // - AppleID and DSID in UserDefaults
-  // - Auth token in keychain with service "com.aspauldingcode.HIAHDesktop.account"
+  // CRITICAL: Check actual authentication state from HIAHAccountManager
+  // This ensures we check if the session is validated, not just if cached data exists
+  // If session validation failed, isAuthenticated will be false even if cached data exists
   
+  Class accountManagerClass = NSClassFromString(@"HIAHAccountManager");
+  if (accountManagerClass) {
+    SEL sharedSel = NSSelectorFromString(@"shared");
+    if ([accountManagerClass respondsToSelector:sharedSel]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+      id accountManager = [accountManagerClass performSelector:sharedSel];
+#pragma clang diagnostic pop
+      if (accountManager) {
+        SEL isAuthenticatedSel = NSSelectorFromString(@"isAuthenticated");
+        if ([accountManager respondsToSelector:isAuthenticatedSel]) {
+          // Wait a moment for session validation to complete (if in progress)
+          // Session restoration happens asynchronously on startup, so we need to give it time
+          for (int i = 0; i < 10; i++) {
+            NSMethodSignature *sig = [accountManager methodSignatureForSelector:isAuthenticatedSel];
+            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+            [inv setTarget:accountManager];
+            [inv setSelector:isAuthenticatedSel];
+            [inv invoke];
+            BOOL isAuthenticated = NO;
+            [inv getReturnValue:&isAuthenticated];
+            
+            if (isAuthenticated) {
+              NSLog(@"[Auth] ✅ User is authenticated (session validated)");
+              return YES;
+            }
+            
+            // If not authenticated yet, wait a bit (session validation might be in progress)
+            if (i < 9) {
+              usleep(200000); // 200ms delay
+            }
+          }
+          
+          // After waiting, check one more time
+          NSMethodSignature *sig = [accountManager methodSignatureForSelector:isAuthenticatedSel];
+          NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+          [inv setTarget:accountManager];
+          [inv setSelector:isAuthenticatedSel];
+          [inv invoke];
+          BOOL isAuthenticated = NO;
+          [inv getReturnValue:&isAuthenticated];
+          
+          if (!isAuthenticated) {
+            NSLog(@"[Auth] ❌ User is NOT authenticated (no valid session after validation)");
+            return NO;
+          }
+        }
+      }
+    }
+  }
+  
+  // Fallback: Check for cached session data (for backwards compatibility)
+  // But this should not be the primary check - session must be validated
   NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
   NSString *appleID = [defaults stringForKey:@"HIAH_Account_AppleID"];
   NSString *dsid = [defaults stringForKey:@"HIAH_Account_DSID"];
@@ -2045,8 +2236,9 @@
 
   if (status == errSecSuccess && result != NULL) {
     CFRelease(result);
-    NSLog(@"[Auth] ✅ Found cached session for: %@", appleID);
-    return YES;
+    NSLog(@"[Auth] ⚠️ Found cached session data but HIAHAccountManager not available - session may not be validated");
+    // Return NO to be safe - we need actual validation
+    return NO;
   }
 
   NSLog(@"[Auth] No auth token found in keychain");
@@ -2533,7 +2725,7 @@
   [[HIAHVPNStateMachine shared] sendEvent:HIAHVPNEventStart];
   
   // Check if VPN setup is needed (for VPN/JIT features)
-  if ([HIAHVPNSetupViewController isSetupNeeded]) {
+  if ([HIAHLocalDevVPNSetupViewController isSetupNeeded]) {
     NSLog(@"[SceneDelegate] 📱 VPN setup needed - showing setup wizard");
     
     // Create a temporary window to present from
@@ -2544,7 +2736,7 @@
     [self.window makeKeyAndVisible];
     
     // Present setup wizard
-    [HIAHVPNSetupViewController presentFrom:tempVC delegate:ad];
+    [HIAHLocalDevVPNSetupViewController presentSetupFromViewController:tempVC delegate:ad];
     return; // Setup wizard will trigger desktop creation when done
   }
 

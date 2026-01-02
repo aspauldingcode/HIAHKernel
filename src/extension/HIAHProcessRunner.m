@@ -18,21 +18,49 @@
 #import "HIAHSigner.h"
 #import "HIAHBypassStatus.h"
 #import <sys/sysctl.h>
+#import <spawn.h>
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
 #import <mach/mach.h>
 #import <objc/runtime.h>
 #import <stdarg.h>
+#import <signal.h>
 
 #pragma mark - Logging
 
 static HIAHLogSubsystem GetExtensionLog(void) { return HIAHLogExtension(); }
 
+// Forward declaration
+static FILE *GetExtensionLogFile(void);
+
 // Force linkage of HIAHExtensionHandler class by referencing it
 static Class gHIAHExtensionHandlerClass = nil;
 
+// Signal handler to catch crashes
+static void signalHandler(int sig) {
+  FILE *logFile = GetExtensionLogFile();
+  if (logFile) {
+    fprintf(logFile, "[HIAHExtension] CRASH: Signal %d received (PID=%d)\n", sig, getpid());
+    fflush(logFile);
+  }
+  fprintf(stderr, "[HIAHExtension] CRASH: Signal %d received (PID=%d)\n", sig, getpid());
+  fprintf(stdout, "[HIAHExtension] CRASH: Signal %d received (PID=%d)\n", sig, getpid());
+  fflush(stdout);
+  fflush(stderr);
+  // Re-raise signal to get crash report
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
+
 __attribute__((constructor(101))) static void ExtensionStartup(void) {
+  // Install signal handlers to catch crashes
+  signal(SIGABRT, signalHandler);
+  signal(SIGSEGV, signalHandler);
+  signal(SIGBUS, signalHandler);
+  signal(SIGILL, signalHandler);
+  signal(SIGFPE, signalHandler);
+  
   // Log to file immediately
   NSFileManager *fm = [NSFileManager defaultManager];
   NSURL *groupURL = [fm containerURLForSecurityApplicationGroupIdentifier:
@@ -67,6 +95,35 @@ __attribute__((constructor(101))) static void ExtensionStartup(void) {
   fflush(stderr);
   HIAHLogInfo(GetExtensionLog, "HIAHProcessRunner extension loaded (PID=%d)",
               getpid());
+  
+  // Notify main app that extension has started so it can enable JIT immediately
+  // Write PID to App Group storage with unique filename (PID-specific) to avoid overwrites
+  // Then post Darwin notification
+  pid_t currentPID = getpid();
+  // Reuse existing fm and groupURL variables from above
+  if (groupURL) {
+    // Write to both the shared file (for backward compatibility) and a unique file
+    NSString *pidFile = [[groupURL.path stringByAppendingPathComponent:@"extension.pid"] stringByStandardizingPath];
+    NSString *pidFileUnique = [[groupURL.path stringByAppendingPathComponent:[NSString stringWithFormat:@"extension.%d.pid", currentPID]] stringByStandardizingPath];
+    
+    // Write to shared file (may be overwritten by other extensions, but that's OK)
+    [[NSString stringWithFormat:@"%d", currentPID] writeToFile:pidFile atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    
+    // Also write to unique file (won't be overwritten)
+    [[NSString stringWithFormat:@"%d", currentPID] writeToFile:pidFileUnique atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    
+    fprintf(stdout, "[HIAHExtension] Wrote PID to App Group storage (PID: %d, shared file + unique file)\n", currentPID);
+    fflush(stdout);
+  }
+  
+  // Post Darwin notification (main app will read PID from App Group storage)
+  CFNotificationCenterRef center = CFNotificationCenterGetDarwinNotifyCenter();
+  if (center) {
+    CFStringRef notificationName = CFSTR("com.aspauldingcode.HIAHDesktop.ExtensionStarted");
+    CFNotificationCenterPostNotification(center, notificationName, NULL, NULL, TRUE);
+    fprintf(stdout, "[HIAHExtension] Posted extension started notification (PID: %d)\n", currentPID);
+    fflush(stdout);
+  }
 
   // CRITICAL: Initialize dyld bypass BEFORE loading any guest apps
   // This patches dyld to allow loading binaries with invalid signatures
@@ -415,6 +472,9 @@ static void ExtLog(FILE *logFile, const char *fmt, ...) {
   }
 }
 
+// Forward declaration
+static void continueBinaryLoadingWithBypass(NSString *executablePath, FILE *logFile, BOOL vpnActive, BOOL jitActive, BOOL useJITLessMode, NSFileManager *fm, NSArray *arguments);
+
 static void ExecuteGuestApplication(NSDictionary *spawnRequest) {
   FILE *logFile = GetExtensionLogFile();
   ExtLog(logFile, "[HIAHExtension] ========================================\n");
@@ -576,69 +636,249 @@ static void ExecuteGuestApplication(NSDictionary *spawnRequest) {
     return;
   }
 
-  // Patch binary for dlopen compatibility.
-  // We must also handle binaries that were previously patched to MH_DYLIB
-  // without LC_ID_DYLIB.
-  ExtLog(logFile, "[HIAHExtension] Patching binary for dlopen compatibility "
-                  "(MH_BUNDLE)...\n");
-
-  if (![HIAHMachOUtils patchBinaryToDylib:executablePath]) {
-    ExtLog(logFile, "[HIAHExtension] Note: binary patch not applied (already "
-                    "compatible or unsupported)\n");
-  } else {
-    ExtLog(logFile, "[HIAHExtension] Binary patched to MH_BUNDLE\n");
-  }
-
   // CRITICAL: Prepare binary for dlopen using signature bypass
   // This ensures VPN is active, JIT is enabled, and binary is signed if needed
   ExtLog(logFile, "[HIAHExtension] Preparing binary for dlopen with signature bypass...\n");
   
-  // Check bypass status using lightweight status reader
-  HIAHBypassStatus *bypassStatus = [HIAHBypassStatus sharedStatus];
-  [bypassStatus refreshStatus];
-  
-  BOOL bypassReady = bypassStatus.isBypassReady;
-  BOOL vpnActive = bypassStatus.isVPNActive;
-  BOOL jitEnabled = bypassStatus.isJITEnabled;
-  
-  ExtLog(logFile, "[HIAHExtension] Bypass status - VPN: %s, JIT: %s, Ready: %s\n",
-         vpnActive ? "YES" : "NO", jitEnabled ? "YES" : "NO", bypassReady ? "YES" : "NO");
-  
-  // Also verify JIT status directly (most reliable check)
+  // CRITICAL: Check JIT status DIRECTLY using csops (most reliable)
+  // Don't rely on HIAHBypassStatus which may be stale - JIT enablement happens
+  // asynchronously via minimuxer and the status file may not be updated immediately
   extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
   #define CS_OPS_STATUS 0
   #define CS_DEBUGGED 0x10000000
   
   int flags = 0;
+  pid_t currentPID = getpid();
   BOOL jitActive = NO;
-  if (csops(getpid(), CS_OPS_STATUS, &flags, sizeof(flags)) == 0) {
+  if (csops(currentPID, CS_OPS_STATUS, &flags, sizeof(flags)) == 0) {
     jitActive = (flags & CS_DEBUGGED) != 0;
+    ExtLog(logFile, "[HIAHExtension] Direct JIT check: PID=%d, flags=0x%x, CS_DEBUGGED=%s\n", 
+           currentPID, flags, jitActive ? "YES" : "NO");
+  } else {
+    ExtLog(logFile, "[HIAHExtension] WARNING: csops failed for PID %d - assuming JIT disabled\n", currentPID);
   }
   
-  // Use direct JIT check as authoritative
-  if (jitActive && !jitEnabled) {
-    ExtLog(logFile, "[HIAHExtension] JIT is active (direct check) but status file says disabled - updating\n");
-    jitEnabled = YES;
+  // Check VPN status (can use bypass status for this)
+  HIAHBypassStatus *bypassStatus = [HIAHBypassStatus sharedStatus];
+  [bypassStatus refreshStatus];
+  BOOL vpnActive = bypassStatus.isVPNActive;
+  
+  ExtLog(logFile, "[HIAHExtension] Initial bypass status - VPN: %s, JIT: %s (direct csops check)\n",
+         vpnActive ? "YES" : "NO", jitActive ? "YES" : "NO");
+  
+  // JIT-LESS MODE: If JIT is not available, use certificate signing instead
+  // This allows apps to launch even without JIT enabled (like LiveContainer)
+  // We'll wait a short time for JIT, but if it doesn't come, we'll use JIT-less mode
+  
+  BOOL useJITLessMode = NO;
+  
+  if (vpnActive && !jitActive) {
+    // Wait a short time (2 seconds) for JIT to be enabled
+    // If JIT doesn't come, we'll use JIT-less mode with certificate signing
+    ExtLog(logFile, "[HIAHExtension] JIT not enabled yet - waiting briefly (2 seconds) for JIT...\n");
+    
+    const int quickRetries = 4; // 4 * 500ms = 2 seconds
+    BOOL jitFound = NO;
+    
+    for (int retry = 0; retry < quickRetries; retry++) {
+      usleep(500000); // 500ms delay
+      
+      int flags = 0;
+      if (csops(getpid(), CS_OPS_STATUS, &flags, sizeof(flags)) == 0) {
+        if (flags & CS_DEBUGGED) {
+          jitActive = YES;
+          jitFound = YES;
+          ExtLog(logFile, "[HIAHExtension] ✅ JIT enabled after %d retries - using JIT mode\n", retry + 1);
+          break;
+        }
+      }
+    }
+    
+    if (!jitFound) {
+      ExtLog(logFile, "[HIAHExtension] JIT not enabled after 2 seconds - using JIT-less mode\n");
+      ExtLog(logFile, "[HIAHExtension] Will patch binary and sign with certificate from SideStore\n");
+      useJITLessMode = YES;
+    }
+  } else if (!vpnActive) {
+    // VPN not active - can't use JIT or JIT-less mode
+    ExtLog(logFile, "[HIAHExtension] ⚠️ VPN not active - cannot use JIT or JIT-less mode\n");
   }
   
-  // Determine if we can use signature bypass
+  // If JIT is enabled, ensure dyld bypass is active
+  if (jitActive && vpnActive) {
+    ExtLog(logFile, "[HIAHExtension] JIT is enabled - ensuring dyld bypass is active...\n");
+    HIAHInitDyldBypass();
+  }
+  
+  // Update bypass status
+  BOOL bypassReady = (jitActive && vpnActive) || useJITLessMode;
+  ExtLog(logFile, "[HIAHExtension] Final bypass status - VPN: %s, JIT: %s, JIT-less: %s, Ready: %s\n",
+         vpnActive ? "YES" : "NO", jitActive ? "YES" : "NO", useJITLessMode ? "YES" : "NO", bypassReady ? "YES" : "NO");
+  
+  // Continue with binary loading
+  continueBinaryLoadingWithBypass(executablePath, logFile, vpnActive, jitActive, useJITLessMode, fm, arguments);
+}
+
+// Helper function to continue binary loading after JIT check
+static void continueBinaryLoadingWithBypass(NSString *executablePath, FILE *logFile, BOOL vpnActive, BOOL jitActive, BOOL useJITLessMode, NSFileManager *fm, NSArray *arguments) {
   BOOL canUseBypass = (jitActive && vpnActive);
   
-  if (!canUseBypass) {
-    ExtLog(logFile, "[HIAHExtension] Signature bypass not available (VPN: %s, JIT: %s) - signing binary as fallback...\n",
-           vpnActive ? "YES" : "NO", jitActive ? "YES" : "NO");
-    // Sign the binary if bypass is not available
-  if ([HIAHSigner signBinaryAtPath:executablePath]) {
-      ExtLog(logFile, "[HIAHExtension] Binary signed successfully\n");
+  if (useJITLessMode) {
+    // JIT-LESS MODE: Patch binary and sign with certificate (like LiveContainer)
+    ExtLog(logFile, "[HIAHExtension] ========================================\n");
+    ExtLog(logFile, "[HIAHExtension] JIT-LESS MODE: Patching and signing binary\n");
+    ExtLog(logFile, "[HIAHExtension] ========================================\n");
+    
+    // Step 1: Patch binary for JIT-less mode (MH_EXECUTE to MH_BUNDLE, patch __PAGEZERO)
+    ExtLog(logFile, "[HIAHExtension] Step 1: Patching binary for JIT-less mode...\n");
+    if ([HIAHMachOUtils patchBinaryForJITLessMode:executablePath]) {
+      ExtLog(logFile, "[HIAHExtension] ✅ Binary patched for JIT-less mode (MH_BUNDLE + __PAGEZERO)\n");
+    } else {
+      ExtLog(logFile, "[HIAHExtension] ⚠️ Binary patching failed - trying basic patch...\n");
+      // Fallback to basic patch
+      [HIAHMachOUtils patchBinaryToDylib:executablePath];
+    }
+    
+    // Step 2: Remove existing signature (required before signing)
+    ExtLog(logFile, "[HIAHExtension] Step 2: Removing existing code signature...\n");
+    BOOL signatureRemoved = [HIAHMachOUtils removeCodeSignature:executablePath];
+    if (signatureRemoved) {
+      ExtLog(logFile, "[HIAHExtension] ✅ Code signature removed\n");
+    } else {
+      ExtLog(logFile, "[HIAHExtension] ⚠️ Code signature removal failed or not found\n");
+    }
+    
+    // Step 3: Sign with certificate from SideStore (or ad-hoc if certificate not available)
+    ExtLog(logFile, "[HIAHExtension] Step 3: Signing binary with certificate from SideStore...\n");
+    BOOL signingSuccess = [HIAHSigner signBinaryAtPath:executablePath];
+    if (signingSuccess) {
+      ExtLog(logFile, "[HIAHExtension] ✅ Binary signed successfully (JIT-less mode ready)\n");
+    } else {
+      ExtLog(logFile, "[HIAHExtension] ❌ Binary signing failed - trying ad-hoc signing...\n");
+      // Try ad-hoc signing as last resort
+      NSString *codesignPath = @"/usr/bin/codesign";
+      if ([[NSFileManager defaultManager] fileExistsAtPath:codesignPath]) {
+        const char *codesignPathC = [codesignPath UTF8String];
+        const char *pathC = [executablePath UTF8String];
+        
+        char *argv[] = {
+          (char *)codesignPathC,
+          "--force",
+          "--sign",
+          "-",  // Ad-hoc signing
+          (char *)pathC,
+          NULL
+        };
+        
+        pid_t pid;
+        int status_code;
+        int result = posix_spawn(&pid, codesignPathC, NULL, NULL, argv, NULL);
+        
+        if (result == 0) {
+          waitpid(pid, &status_code, 0);
+          if (WIFEXITED(status_code) && WEXITSTATUS(status_code) == 0) {
+            ExtLog(logFile, "[HIAHExtension] ✅ Binary ad-hoc signed successfully\n");
+            signingSuccess = YES;
+          } else {
+            ExtLog(logFile, "[HIAHExtension] ❌ Ad-hoc signing also failed (exit: %d)\n", WEXITSTATUS(status_code));
+          }
+        } else {
+          ExtLog(logFile, "[HIAHExtension] ❌ Failed to spawn codesign: %s\n", strerror(result));
+        }
+      } else {
+        ExtLog(logFile, "[HIAHExtension] ❌ codesign not available\n");
+      }
+      
+      if (!signingSuccess) {
+        ExtLog(logFile, "[HIAHExtension] ⚠️ All signing attempts failed - dlopen will likely fail\n");
+        ExtLog(logFile, "[HIAHExtension] ⚠️ Make sure you're signed into HIAH LoginWindow with SideStore\n");
+      }
+    }
+  } else if (canUseBypass) {
+    // JIT MODE: Use signature bypass (remove signature, rely on dyld bypass hooks)
+    ExtLog(logFile, "[HIAHExtension] ========================================\n");
+    ExtLog(logFile, "[HIAHExtension] JIT MODE: Using signature bypass\n");
+    ExtLog(logFile, "[HIAHExtension] ========================================\n");
+    
+    // CRITICAL: Always remove signature BEFORE dlopen, even with JIT enabled
+    // This ensures dlopen doesn't fail on signature checks before our hooks are called
+    ExtLog(logFile, "[HIAHExtension] Removing code signature from binary (required for dlopen)...\n");
+    BOOL signatureRemoved = [HIAHMachOUtils removeCodeSignature:executablePath];
+    if (signatureRemoved) {
+      ExtLog(logFile, "[HIAHExtension] ✅ Code signature removed successfully\n");
+    } else {
+      ExtLog(logFile, "[HIAHExtension] ⚠️ Code signature removal failed or not found\n");
+    }
+    
+    ExtLog(logFile, "[HIAHExtension] Signature bypass available (VPN + JIT active) - dyld bypass should work\n");
+    ExtLog(logFile, "[HIAHExtension] CS_DEBUGGED flag: SET - dyld will skip signature validation\n");
+    ExtLog(logFile, "[HIAHExtension] Dyld bypass hooks should intercept signature checks\n");
   } else {
+    // FALLBACK: VPN active but JIT not available - use JIT-less mode
+    // This should only happen if the JIT-less mode check above didn't trigger
+    ExtLog(logFile, "[HIAHExtension] ========================================\n");
+    ExtLog(logFile, "[HIAHExtension] FALLBACK MODE: VPN active but JIT not available\n");
+    ExtLog(logFile, "[HIAHExtension] Using JIT-less mode (patch + sign)\n");
+    ExtLog(logFile, "[HIAHExtension] ========================================\n");
+    ExtLog(logFile, "[HIAHExtension] Signature bypass not available (VPN: %s, JIT: %s)\n",
+           vpnActive ? "YES" : "NO", jitActive ? "YES" : "NO");
+    
+    // Step 1: Patch binary for JIT-less mode
+    ExtLog(logFile, "[HIAHExtension] Step 1: Patching binary for JIT-less mode...\n");
+    if ([HIAHMachOUtils patchBinaryForJITLessMode:executablePath]) {
+      ExtLog(logFile, "[HIAHExtension] ✅ Binary patched for JIT-less mode (MH_BUNDLE + __PAGEZERO)\n");
+    } else {
+      ExtLog(logFile, "[HIAHExtension] ⚠️ Binary patching failed - trying basic patch...\n");
+      [HIAHMachOUtils patchBinaryToDylib:executablePath];
+    }
+    
+    // Step 2: Remove signature first
+    ExtLog(logFile, "[HIAHExtension] Step 2: Removing code signature...\n");
+    [HIAHMachOUtils removeCodeSignature:executablePath];
+    
+    // Step 3: Try to sign
+    ExtLog(logFile, "[HIAHExtension] Step 3: Attempting to sign binary...\n");
+    BOOL signingSuccess = [HIAHSigner signBinaryAtPath:executablePath];
+    if (!signingSuccess) {
+      // Try ad-hoc signing as fallback
+      ExtLog(logFile, "[HIAHExtension] Certificate signing failed - trying ad-hoc signing...\n");
+      NSString *codesignPath = @"/usr/bin/codesign";
+      if ([[NSFileManager defaultManager] fileExistsAtPath:codesignPath]) {
+        const char *codesignPathC = [codesignPath UTF8String];
+        const char *pathC = [executablePath UTF8String];
+        
+        char *argv[] = {
+          (char *)codesignPathC,
+          "--force",
+          "--sign",
+          "-",  // Ad-hoc signing
+          (char *)pathC,
+          NULL
+        };
+        
+        pid_t pid;
+        int status_code;
+        int result = posix_spawn(&pid, codesignPathC, NULL, NULL, argv, NULL);
+        
+        if (result == 0) {
+          waitpid(pid, &status_code, 0);
+          if (WIFEXITED(status_code) && WEXITSTATUS(status_code) == 0) {
+            ExtLog(logFile, "[HIAHExtension] ✅ Binary ad-hoc signed successfully\n");
+            signingSuccess = YES;
+          } else {
+            ExtLog(logFile, "[HIAHExtension] ❌ Ad-hoc signing failed (exit: %d)\n", WEXITSTATUS(status_code));
+          }
+        } else {
+          ExtLog(logFile, "[HIAHExtension] ❌ Failed to spawn codesign: %s\n", strerror(result));
+        }
+      }
+    }
+    
+    if (signingSuccess) {
+      ExtLog(logFile, "[HIAHExtension] Binary signed successfully\n");
+    } else {
       ExtLog(logFile, "[HIAHExtension] WARNING: Binary signing failed - dlopen may fail\n");
     }
-  } else {
-    ExtLog(logFile, "[HIAHExtension] Signature bypass available (VPN + JIT active) - dyld bypass should work\n");
-    ExtLog(logFile, "[HIAHExtension] CS_DEBUGGED flag: %s - dyld will skip signature validation\n",
-           jitActive ? "SET" : "NOT SET");
-    // Still clean up signature for safety (dyld bypass handles validation, but clean sig helps)
-    [HIAHSigner signBinaryAtPath:executablePath];
   }
 
   // Set up bundle context for the guest app
@@ -761,12 +1001,30 @@ static void ExecuteGuestApplication(NSDictionary *spawnRequest) {
   ExtLog(logFile, "[HIAHExtension] Installing UIApplicationMain hook...\n");
   InstallUIApplicationMainHook();
 
+  // CRITICAL: Ensure dyld bypass is initialized before loading binary
+  if (jitActive && vpnActive) {
+    ExtLog(logFile, "[HIAHExtension] Ensuring dyld bypass is initialized before loading binary...\n");
+    @try {
+      HIAHInitDyldBypass();
+      ExtLog(logFile, "[HIAHExtension] Dyld bypass initialization complete\n");
+      
+      // Set guest executable path for @executable_path resolution (like LiveContainer)
+      HIAHSetGuestExecutablePath(executablePath);
+      ExtLog(logFile, "[HIAHExtension] Set guest executable path for @executable_path resolution\n");
+    } @catch (NSException *exception) {
+      ExtLog(logFile, "[HIAHExtension] ERROR: Dyld bypass initialization failed: %s\n", 
+             exception.reason ? [exception.reason UTF8String] : "unknown error");
+    }
+  }
+  
   // Load guest binary as a dylib
   // RTLD_NOW: Resolve all symbols immediately
   // RTLD_GLOBAL: Make symbols available to other loaded libraries
   // RTLD_NOLOAD: Don't load if already loaded (we want fresh load)
   ExtLog(logFile, "[HIAHExtension] Loading guest binary via dlopen: %s\n",
          [executablePath UTF8String]);
+  ExtLog(logFile, "[HIAHExtension] JIT status: %s, VPN status: %s\n",
+         jitActive ? "ENABLED" : "DISABLED", vpnActive ? "ACTIVE" : "INACTIVE");
   HIAHLogInfo(GetExtensionLog, "Loading guest binary as dylib via dlopen");
 
   void *guestHandle = dlopen(executablePath.UTF8String, RTLD_NOW | RTLD_GLOBAL);
@@ -790,15 +1048,40 @@ static void ExecuteGuestApplication(NSDictionary *spawnRequest) {
   HIAHLogDebug(GetExtensionLog, "Guest binary loaded as dylib at handle: %p",
                guestHandle);
 
+  // CRITICAL: Ensure dyld bypass is initialized before finding entry point
+  if (jitActive && vpnActive) {
+    ExtLog(logFile, "[HIAHExtension] Re-checking dyld bypass before finding entry point...\n");
+    @try {
+      HIAHInitDyldBypass();
+    } @catch (NSException *exception) {
+      ExtLog(logFile, "[HIAHExtension] WARNING: Dyld bypass re-init failed: %s\n",
+             exception.reason ? [exception.reason UTF8String] : "unknown error");
+    }
+  }
+  
   // Locate entry point (main function) in the loaded dylib
   fprintf(stdout,
           "[HIAHExtension] Locating guest entry point (main function)...\n");
   fflush(stdout);
-  void *entryPoint = FindEntryPoint(guestHandle, executablePath);
+  ExtLog(logFile, "[HIAHExtension] Locating guest entry point...\n");
+  
+  void *entryPoint = NULL;
+  @try {
+    entryPoint = FindEntryPoint(guestHandle, executablePath);
+  } @catch (NSException *exception) {
+    ExtLog(logFile, "[HIAHExtension] ERROR: Exception in FindEntryPoint: %s\n",
+           exception.reason ? [exception.reason UTF8String] : "unknown error");
+    fprintf(stdout, "[HIAHExtension] ERROR: Exception in FindEntryPoint: %s\n",
+            exception.reason ? [exception.reason UTF8String] : "unknown error");
+    fflush(stdout);
+    return;
+  }
+  
   if (!entryPoint) {
     fprintf(stdout,
             "[HIAHExtension] ERROR: Could not find guest entry point\n");
     fflush(stdout);
+    ExtLog(logFile, "[HIAHExtension] ERROR: Could not find guest entry point\n");
     HIAHLogError(GetExtensionLog, "Could not find guest entry point");
     return;
   }
@@ -838,7 +1121,7 @@ static void ExecuteGuestApplication(NSDictionary *spawnRequest) {
               "UIApplicationMain)",
               guestArgc);
 
-  int (*guestMain)(int, char **) = entryPoint;
+  int (*guestMain)(int, char **) = (int (*)(int, char **))entryPoint;
 
   // Set guest active BEFORE calling main
   gGuestActive = YES;
@@ -849,6 +1132,12 @@ static void ExecuteGuestApplication(NSDictionary *spawnRequest) {
                   "UIApplicationMain\n");
   fprintf(stdout,
           "[HIAHExtension] Our UIApplicationMain hook will intercept it\n");
+  ExtLog(logFile, "[HIAHExtension] About to call guest main() - JIT: %s, VPN: %s\n",
+         jitActive ? "ENABLED" : "DISABLED", vpnActive ? "ACTIVE" : "INACTIVE");
+  fflush(stdout);
+  if (logFile) {
+    fflush(logFile);
+  }
   fflush(stdout);
 
   // Call guest main() - this will trigger UIApplicationMain which our hook will
@@ -1008,6 +1297,19 @@ static void ExecuteGuestApplication(NSDictionary *spawnRequest) {
 }
 
 - (void)beginRequestWithExtensionContext:(NSExtensionContext *)context {
+  // CRITICAL: Log immediately to stdout/stderr before anything else
+  // This ensures we see logs even if file logging fails
+  fprintf(stdout, "\n\n[HIAHExtension] ========================================\n");
+  fprintf(stdout, "[HIAHExtension] beginRequestWithExtensionContext CALLED!\n");
+  fprintf(stdout, "[HIAHExtension] PID: %d\n", getpid());
+  fprintf(stdout, "[HIAHExtension] ========================================\n\n");
+  fprintf(stderr, "\n\n[HIAHExtension] ========================================\n");
+  fprintf(stderr, "[HIAHExtension] beginRequestWithExtensionContext CALLED!\n");
+  fprintf(stderr, "[HIAHExtension] PID: %d\n", getpid());
+  fprintf(stderr, "[HIAHExtension] ========================================\n\n");
+  fflush(stdout);
+  fflush(stderr);
+  
   // Log to App Group shared directory so host app can read it
   NSFileManager *fm = [NSFileManager defaultManager];
   NSURL *groupURL = [fm containerURLForSecurityApplicationGroupIdentifier:

@@ -11,6 +11,7 @@
 
 #import "HIAHDyldBypass.h"
 #import "../HIAHDesktop/HIAHLogging.h"
+#import "HIAHHook.h"
 #import <TargetConditionals.h>
 
 // This file contains ARM64-specific assembly that only works on real devices
@@ -119,22 +120,31 @@ static bool searchAndPatch(const char *name, char *base, char *signature, int le
 
 // Hooked mmap - fallback to anonymous memory if signature check fails
 static void* hooked_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset) {
+    static int callCount = 0;
+    callCount++;
+    
     void *map = __mmap(addr, len, prot, flags, fd, offset);
     
     // If mmap failed and we're trying to map executable code, use anonymous memory
     if (map == MAP_FAILED && fd && (prot & PROT_EXEC)) {
-        NSLog(@"[HIAHDyldBypass] mmap failed for executable, using anonymous memory");
+        NSLog(@"[HIAHDyldBypass] ✅ Hooked mmap called - mmap failed for executable (fd=%d, len=%zu), using anonymous memory - call #%d", fd, len, callCount);
         map = __mmap(addr, len, PROT_READ | PROT_WRITE, flags | MAP_PRIVATE | MAP_ANON, 0, 0);
         
         if (map != MAP_FAILED) {
+            NSLog(@"[HIAHDyldBypass] Anonymous mmap succeeded, loading file content...");
             // Load file into anonymous memory
             void *memoryLoadedFile = __mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, offset);
             if (memoryLoadedFile != MAP_FAILED) {
                 memcpy(map, memoryLoadedFile, len);
                 munmap(memoryLoadedFile, len);
+                NSLog(@"[HIAHDyldBypass] File content loaded into anonymous memory");
             }
             mprotect(map, len, prot);
+        } else {
+            NSLog(@"[HIAHDyldBypass] ❌ Anonymous mmap also failed!");
         }
+    } else if (map != MAP_FAILED && fd && (prot & PROT_EXEC) && callCount <= 10) {
+        NSLog(@"[HIAHDyldBypass] Hooked mmap succeeded (fd=%d, len=%zu) - call #%d", fd, len, callCount);
     }
     
     return map;
@@ -142,23 +152,39 @@ static void* hooked_mmap(void *addr, size_t len, int prot, int flags, int fd, of
 
 // Hooked fcntl - bypass signature validation
 static int hooked_fcntl(int fildes, int cmd, void *param) {
+    // Log all fcntl calls to verify hooks are working
+    static int callCount = 0;
+    callCount++;
+    
     // F_ADDFILESIGS_RETURN: dyld trying to attach code signature
     if (cmd == F_ADDFILESIGS_RETURN) {
+        NSLog(@"[HIAHDyldBypass] ✅ Hooked fcntl called (F_ADDFILESIGS_RETURN) - call #%d, fd=%d", callCount, fildes);
 #if !(TARGET_OS_MACCATALYST || TARGET_OS_SIMULATOR)
         // Try to attach signature normally first
-        orig_fcntl(fildes, cmd, param);
+        int result = orig_fcntl(fildes, cmd, param);
+        NSLog(@"[HIAHDyldBypass] Original fcntl returned: %d", result);
 #endif
         // Make dyld think signature covers everything
         fsignatures_t *fsig = (fsignatures_t*)param;
-        fsig->fs_file_start = 0xFFFFFFFF;
+        if (fsig) {
+            fsig->fs_file_start = 0xFFFFFFFF;
+            NSLog(@"[HIAHDyldBypass] Modified fs_file_start to 0xFFFFFFFF to bypass validation");
+        }
         return 0;
     }
     
     // F_CHECK_LV: dyld checking library validation
     else if (cmd == F_CHECK_LV) {
-        orig_fcntl(fildes, cmd, param);
-        // Always return success
+        NSLog(@"[HIAHDyldBypass] ✅ Hooked fcntl called (F_CHECK_LV) - call #%d, fd=%d", callCount, fildes);
+        int result = orig_fcntl(fildes, cmd, param);
+        NSLog(@"[HIAHDyldBypass] Original F_CHECK_LV returned: %d, forcing success", result);
+        // Always return success (bypass library validation)
         return 0;
+    }
+    
+    // Log other commands for debugging
+    if (callCount <= 10) { // Only log first 10 to avoid spam
+        NSLog(@"[HIAHDyldBypass] Hooked fcntl called (cmd=%d) - call #%d, fd=%d", cmd, callCount, fildes);
     }
     
     // Pass through other commands
@@ -167,21 +193,35 @@ static int hooked_fcntl(int fildes, int cmd, void *param) {
 
 void HIAHInitDyldBypass(void) {
     static BOOL bypassed = NO;
+    static BOOL attempted = NO;
+    
+    // Check if JIT is enabled - if not, skip bypass (will need re-signing instead)
+    BOOL jitEnabled = HIAHIsJITEnabled();
+    
+    // If we already attempted and JIT wasn't enabled, check again now
+    // This allows re-initialization when JIT becomes enabled later
+    if (attempted && !bypassed && jitEnabled) {
+        NSLog(@"[HIAHDyldBypass] JIT is now enabled - re-initializing bypass");
+        bypassed = NO; // Reset to allow initialization
+    }
+    
     if (bypassed) {
         return;
     }
-    bypassed = YES;
+    
+    attempted = YES;
     
     NSLog(@"[HIAHDyldBypass] Initializing dyld bypass...");
     HIAHLogInfo(HIAHLogKernel, "Initializing dyld library validation bypass");
     
-    // Check if JIT is enabled - if not, skip bypass (will need re-signing instead)
-    if (!HIAHIsJITEnabled()) {
+    if (!jitEnabled) {
         NSLog(@"[HIAHDyldBypass] JIT not enabled - skipping dyld bypass");
         NSLog(@"[HIAHDyldBypass] Will need to use re-signing for .ipa apps");
         HIAHLogError(HIAHLogKernel, "JIT not enabled - dyld bypass skipped");
         return; // Don't attempt bypass without JIT
     }
+    
+    bypassed = YES;
     
     NSLog(@"[HIAHDyldBypass] JIT enabled - proceeding with bypass");
     
@@ -273,6 +313,133 @@ BOOL HIAHIsJITEnabled(void) {
     
     return NO;
 #endif
+}
+
+// Guest executable path for @executable_path resolution
+static NSString *gGuestExecutablePath = nil;
+static int (*orig_NSGetExecutablePath)(char *buf, uint32_t *bufsize) = NULL;
+static BOOL gNSGetExecutablePathHooked = NO;
+
+// Hook _NSGetExecutablePath to return guest app's path
+// This is what LiveContainer does to patch @executable_path
+static int hooked_NSGetExecutablePath(char *buf, uint32_t *bufsize) {
+    if (gGuestExecutablePath && bufsize) {
+        const char *guestPath = [gGuestExecutablePath UTF8String];
+        size_t guestPathLen = strlen(guestPath);
+        
+        if (*bufsize >= guestPathLen + 1) {
+            strncpy(buf, guestPath, *bufsize - 1);
+            buf[*bufsize - 1] = '\0';
+            *bufsize = (uint32_t)guestPathLen;
+            NSLog(@"[HIAHDyldBypass] _NSGetExecutablePath returning guest path: %s", guestPath);
+            return 0;
+        } else {
+            *bufsize = (uint32_t)guestPathLen + 1;
+            return -1; // Buffer too small
+        }
+    }
+    
+    // Fallback to original implementation
+    if (orig_NSGetExecutablePath) {
+        return orig_NSGetExecutablePath(buf, bufsize);
+    }
+    
+    return -1;
+}
+
+void HIAHSetGuestExecutablePath(NSString *guestExecutablePath) {
+    gGuestExecutablePath = guestExecutablePath;
+    NSLog(@"[HIAHDyldBypass] Set guest executable path: %@", guestExecutablePath);
+    
+    if (gNSGetExecutablePathHooked) {
+        NSLog(@"[HIAHDyldBypass] _NSGetExecutablePath already hooked, updating path");
+        return; // Already hooked, just update the path
+    }
+    
+    // Get original function pointer
+    orig_NSGetExecutablePath = dlsym(RTLD_DEFAULT, "_NSGetExecutablePath");
+    if (!orig_NSGetExecutablePath) {
+        NSLog(@"[HIAHDyldBypass] ERROR: Could not find _NSGetExecutablePath");
+        HIAHLogError(HIAHLogKernel, "Could not find _NSGetExecutablePath");
+        return;
+    }
+    
+    NSLog(@"[HIAHDyldBypass] Found _NSGetExecutablePath at %p", orig_NSGetExecutablePath);
+    
+    // Method 1: Use HIAHHookIntercept to hook via symbol pointer tables
+    // This works if _NSGetExecutablePath is called through symbol pointers
+    HIAHHookResult result = HIAHHookIntercept(HIAHHookScopeGlobal, NULL, 
+                                               orig_NSGetExecutablePath, 
+                                               (void *)hooked_NSGetExecutablePath);
+    if (result == HIAHHookResultSuccess) {
+        gNSGetExecutablePathHooked = YES;
+        NSLog(@"[HIAHDyldBypass] ✅ Hooked _NSGetExecutablePath via HIAHHookIntercept");
+        HIAHLogInfo(HIAHLogKernel, "Hooked _NSGetExecutablePath for @executable_path resolution");
+        return;
+    }
+    
+    NSLog(@"[HIAHDyldBypass] HIAHHookIntercept failed (result: %d), trying direct patching...", result);
+    
+    // Method 2: Patch call sites in dyld (like LiveContainer does)
+    // LiveContainer hooks dyld4::APIs::_NSGetExecutablePath, which means
+    // they patch where dyld calls _NSGetExecutablePath, not the function itself
+    char *dyldBase = NULL;
+    uint32_t imageCount = _dyld_image_count();
+    
+    for (uint32_t i = 0; i < imageCount; i++) {
+        const char *imageName = _dyld_get_image_name(i);
+        if (imageName && (strstr(imageName, "/dyld") || strstr(imageName, "dyld"))) {
+            dyldBase = (char *)_dyld_get_image_header(i);
+            NSLog(@"[HIAHDyldBypass] Found dyld for patching call sites: %s", imageName);
+            break;
+        }
+    }
+    
+    if (dyldBase) {
+        // Search for calls to _NSGetExecutablePath in dyld
+        // We look for bl (branch with link) instructions that might call it
+        // This is a heuristic - we search for patterns that might be calls
+        BOOL foundCallSite = NO;
+        
+        // Search for the function pointer in dyld's data sections
+        // If dyld stores a pointer to _NSGetExecutablePath, we can patch it
+        for (int i = 0; i < 0x100000; i += 8) { // Search in 8-byte increments (pointer-aligned)
+            void **ptr = (void **)(dyldBase + i);
+            if (*ptr == orig_NSGetExecutablePath) {
+                NSLog(@"[HIAHDyldBypass] Found _NSGetExecutablePath pointer in dyld at offset 0x%x", i);
+                
+                // Patch the pointer to point to our hook
+                kern_return_t kret = builtin_vm_protect(mach_task_self(), (vm_address_t)ptr, 
+                                                       sizeof(void *), false, 
+                                                       PROT_READ | PROT_WRITE | VM_PROT_COPY);
+                if (kret == KERN_SUCCESS) {
+                    *ptr = (void *)hooked_NSGetExecutablePath;
+                    builtin_vm_protect(mach_task_self(), (vm_address_t)ptr, 
+                                      sizeof(void *), false, 
+                                      PROT_READ);
+                    foundCallSite = YES;
+                    gNSGetExecutablePathHooked = YES;
+                    NSLog(@"[HIAHDyldBypass] ✅ Patched _NSGetExecutablePath pointer in dyld");
+                    HIAHLogInfo(HIAHLogKernel, "Patched _NSGetExecutablePath pointer in dyld");
+                    break;
+                }
+            }
+        }
+        
+        if (!foundCallSite) {
+            NSLog(@"[HIAHDyldBypass] Could not find _NSGetExecutablePath call site in dyld");
+        }
+    } else {
+        NSLog(@"[HIAHDyldBypass] Could not find dyld base address for call site patching");
+    }
+    
+    // Method 3: If both methods failed, at least we have the path stored
+    // Some code paths might check gGuestExecutablePath directly
+    if (!gNSGetExecutablePathHooked) {
+        NSLog(@"[HIAHDyldBypass] ⚠️ Could not hook _NSGetExecutablePath, but path is stored");
+        NSLog(@"[HIAHDyldBypass] ⚠️ @executable_path resolution may not work for all cases");
+        HIAHLogWarning(HIAHLogKernel, "Could not hook _NSGetExecutablePath - @executable_path may not work");
+    }
 }
 
 #endif // !TARGET_OS_SIMULATOR - Real device implementation

@@ -25,10 +25,10 @@
 #import "SwiftBridgeCore.h"
 #import "minimuxer.h"
 
-// HIAH VPN and JIT (WireGuard-based)
+// HIAH VPN and JIT (LocalDevVPN-based - official SideStore VPN)
 #import "VPN/HIAHVPNManager.h"
 #import "VPN/HIAHVPNStateMachine.h"
-#import "VPN/WireGuard/HIAHWireGuardManager.h"
+#import "VPN/LocalDevVPN/HIAHLocalDevVPNManager.h"
 #import "JIT/HIAHJITManager.h"
 #import "JIT/HIAHJITEnablerHelper.h"
 #import "Signing/HIAHSignatureBypass.h"

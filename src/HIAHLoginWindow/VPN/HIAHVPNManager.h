@@ -2,8 +2,8 @@
  * HIAHVPNManager.h
  * HIAH LoginWindow - VPN Management
  *
- * Manages VPN connectivity using WireGuard (App Store) for JIT enablement.
- * This approach works without a paid Apple Developer account.
+ * Manages VPN connectivity using LocalDevVPN (App Store) for JIT enablement.
+ * This is the official VPN used by SideStore.
  *
  * Based on SideStore (AGPLv3)
  * Copyright (c) 2025 Alex Spaulding
@@ -11,7 +11,7 @@
  */
 
 #import <Foundation/Foundation.h>
-#import "WireGuard/HIAHWireGuardManager.h"
+#import "LocalDevVPN/HIAHLocalDevVPNManager.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -25,25 +25,25 @@ NS_ASSUME_NONNULL_BEGIN
 /// Set up VPN manager
 - (void)setupVPNManager;
 
-/// Start VPN (opens WireGuard for manual activation)
+/// Start VPN (opens LocalDevVPN for manual activation)
 - (void)startVPNWithCompletion:(void (^_Nullable)(NSError * _Nullable error))completion;
 
-/// Stop VPN (user must do this manually in WireGuard)
+/// Stop VPN (user must do this manually in LocalDevVPN)
 - (void)stopVPN;
 
-#pragma mark - WireGuard Integration
+#pragma mark - LocalDevVPN Integration
 
-/// Check if WireGuard is installed
-- (BOOL)isWireGuardInstalled;
+/// Check if LocalDevVPN is installed
+- (BOOL)isLocalDevVPNInstalled;
 
-/// Current WireGuard status
-- (HIAHWireGuardStatus)wireGuardStatus;
+/// Current LocalDevVPN status
+- (HIAHLocalDevVPNStatus)localDevVPNStatus;
 
-/// Open WireGuard app with configuration
-- (void)openWireGuardApp;
+/// Open LocalDevVPN app
+- (void)openLocalDevVPNApp;
 
-/// Open App Store to install WireGuard
-- (void)installWireGuard;
+/// Open App Store to install LocalDevVPN
+- (void)installLocalDevVPN;
 
 @end
 

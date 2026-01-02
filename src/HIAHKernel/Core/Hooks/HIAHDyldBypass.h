@@ -45,5 +45,14 @@ void HIAHInitDyldBypass(void);
  */
 BOOL HIAHIsJITEnabled(void);
 
+/**
+ * Set the guest executable path for @executable_path resolution.
+ * This hooks into dyld's _NSGetExecutablePath to return the guest app's path
+ * instead of the host app's path.
+ *
+ * @param guestExecutablePath Path to the guest app's executable
+ */
+void HIAHSetGuestExecutablePath(NSString *guestExecutablePath);
+
 #endif /* HIAHDyldBypass_h */
 

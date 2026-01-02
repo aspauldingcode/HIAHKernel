@@ -2,8 +2,8 @@
  * HIAHVPNManager.m
  * HIAH LoginWindow - VPN Management
  *
- * Manages VPN connectivity using WireGuard (App Store) for JIT enablement.
- * This approach works without a paid Apple Developer account.
+ * Manages VPN connectivity using LocalDevVPN (App Store) for JIT enablement.
+ * This is the official VPN used by SideStore.
  *
  * Based on SideStore (AGPLv3)
  * Copyright (c) 2025 Alex Spaulding
@@ -11,14 +11,14 @@
  */
 
 #import "HIAHVPNManager.h"
-#import "WireGuard/HIAHWireGuardManager.h"
+#import "LocalDevVPN/HIAHLocalDevVPNManager.h"
 #import "../../HIAHDesktop/HIAHLogging.h"
 #import <Foundation/Foundation.h>
 
 @interface HIAHVPNManager ()
 
 @property (nonatomic, assign, readwrite) BOOL isVPNActive;
-@property (nonatomic, strong) HIAHWireGuardManager *wireGuardManager;
+@property (nonatomic, strong) HIAHLocalDevVPNManager *localDevVPNManager;
 
 @end
 
@@ -37,27 +37,27 @@
     self = [super init];
     if (self) {
         _isVPNActive = NO;
-        _wireGuardManager = [HIAHWireGuardManager sharedManager];
+        _localDevVPNManager = [HIAHLocalDevVPNManager sharedManager];
         [self setupVPNManager];
     }
     return self;
 }
 
 - (void)setupVPNManager {
-    HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"Setting up VPN manager (WireGuard mode)...");
+    HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"Setting up VPN manager (LocalDevVPN mode)...");
     
-    // Start monitoring WireGuard VPN status
-    [self.wireGuardManager startMonitoringVPNStatus];
+    // Start monitoring LocalDevVPN status
+    [self.localDevVPNManager startMonitoringVPNStatus];
     
-    // Check if WireGuard is installed
-    if ([self.wireGuardManager isWireGuardInstalled]) {
-        HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"WireGuard is installed");
+    // Check if LocalDevVPN is installed
+    if ([self.localDevVPNManager isLocalDevVPNInstalled]) {
+        HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"LocalDevVPN is installed");
     } else {
-        HIAHLogEx(HIAH_LOG_WARNING, @"VPN", @"WireGuard not installed - VPN/JIT will not work");
-        HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"Install WireGuard from App Store for JIT support");
+        HIAHLogEx(HIAH_LOG_WARNING, @"VPN", @"LocalDevVPN not installed - VPN/JIT will not work");
+        HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"Install LocalDevVPN from App Store for JIT support");
     }
     
-    // Observe WireGuard status changes
+    // Observe LocalDevVPN status changes
     [NSTimer scheduledTimerWithTimeInterval:2.0
                                      target:self
                                    selector:@selector(updateVPNStatus)
@@ -67,7 +67,7 @@
 
 - (void)updateVPNStatus {
     BOOL wasActive = self.isVPNActive;
-    self.isVPNActive = self.wireGuardManager.isVPNActive;
+    self.isVPNActive = self.localDevVPNManager.isVPNActive;
     
     if (wasActive != self.isVPNActive) {
         HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"Status changed: %@",
@@ -80,28 +80,28 @@
 }
 
 - (void)startVPNWithCompletion:(void (^)(NSError * _Nullable error))completion {
-    HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"Starting VPN (WireGuard mode)...");
+    HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"Starting VPN (LocalDevVPN mode)...");
     
-    // Check if WireGuard is installed
-    if (![self.wireGuardManager isWireGuardInstalled]) {
-        HIAHLogEx(HIAH_LOG_WARNING, @"VPN", @"WireGuard not installed - user should use setup wizard");
+    // Check if LocalDevVPN is installed
+    if (![self.localDevVPNManager isLocalDevVPNInstalled]) {
+        HIAHLogEx(HIAH_LOG_WARNING, @"VPN", @"LocalDevVPN not installed - user should use setup wizard");
         
         // Don't automatically open App Store - let the setup wizard handle user interaction
-        // The WireGuard setup flow will guide the user through installation
+        // The LocalDevVPN setup flow will guide the user through installation
         
         if (completion) {
             completion([NSError errorWithDomain:@"VPNManager"
                                            code:-1
                                        userInfo:@{
-                NSLocalizedDescriptionKey: @"WireGuard not installed. Use the WireGuard setup wizard to install and configure."
+                NSLocalizedDescriptionKey: @"LocalDevVPN not installed. Use the VPN setup wizard to install and configure."
             }]);
         }
         return;
     }
     
     // Check if VPN is already active
-    if (self.wireGuardManager.isVPNActive) {
-        HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"WireGuard VPN is already active");
+    if (self.localDevVPNManager.isVPNActive) {
+        HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"LocalDevVPN is already active");
         self.isVPNActive = YES;
         if (completion) {
             completion(nil);
@@ -109,45 +109,42 @@
         return;
     }
     
-    // Open WireGuard with configuration
-    // User will need to manually activate the tunnel
-    HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"Opening WireGuard for tunnel activation...");
-    [self.wireGuardManager openWireGuardWithConfiguration];
+    // Open LocalDevVPN app
+    // User will need to manually activate the VPN
+    HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"Opening LocalDevVPN for activation...");
+    [self.localDevVPNManager openLocalDevVPN];
     
-    // Copy configuration to pasteboard as backup
-    [self.wireGuardManager copyConfigurationToPasteboard];
-    
-    // Return success - user needs to manually enable the tunnel in WireGuard
+    // Return success - user needs to manually enable the VPN in LocalDevVPN
     if (completion) {
         completion([NSError errorWithDomain:@"VPNManager"
                                        code:0
                                    userInfo:@{
-            NSLocalizedDescriptionKey: @"Please enable the HIAH tunnel in WireGuard app. Configuration has been copied to clipboard."
+            NSLocalizedDescriptionKey: @"Please enable the VPN in LocalDevVPN app."
         }]);
     }
 }
 
 - (void)stopVPN {
-    HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"To stop VPN, disable the tunnel in WireGuard app");
-    // Cannot programmatically stop WireGuard - user must do it manually
+    HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"To stop VPN, disable it in LocalDevVPN app");
+    // Cannot programmatically stop LocalDevVPN - user must do it manually
 }
 
-#pragma mark - WireGuard Status
+#pragma mark - LocalDevVPN Status
 
-- (BOOL)isWireGuardInstalled {
-    return [self.wireGuardManager isWireGuardInstalled];
+- (BOOL)isLocalDevVPNInstalled {
+    return [self.localDevVPNManager isLocalDevVPNInstalled];
 }
 
-- (HIAHWireGuardStatus)wireGuardStatus {
-    return self.wireGuardManager.status;
+- (HIAHLocalDevVPNStatus)localDevVPNStatus {
+    return self.localDevVPNManager.status;
 }
 
-- (void)openWireGuardApp {
-    [self.wireGuardManager openWireGuardWithConfiguration];
+- (void)openLocalDevVPNApp {
+    [self.localDevVPNManager openLocalDevVPN];
 }
 
-- (void)installWireGuard {
-    [self.wireGuardManager openWireGuardInAppStore];
+- (void)installLocalDevVPN {
+    [self.localDevVPNManager openLocalDevVPNInAppStore];
 }
 
 @end

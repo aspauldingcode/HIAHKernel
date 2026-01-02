@@ -52,11 +52,29 @@ settings:
 
 packages:
   AltSign:
-    path: vendor/local_packages/AltSign
+    path: dependencies/swift-packages/AltSign
   Roxas:
-    path: vendor/local_packages/Roxas
+    path: dependencies/swift-packages/Roxas
 
 targets:
+  HIAHKernel:
+    type: framework
+    platform: iOS
+    sources:
+      - path: src/HIAHKernel
+    settings:
+      PRODUCT_NAME: HIAHKernel
+      PRODUCT_BUNDLE_IDENTIFIER: com.aspauldingcode.HIAHKernel
+      SKIP_INSTALL: YES
+      MACH_O_TYPE: mh_dylib
+      DEFINES_MODULE: YES
+      DYLIB_COMPATIBILITY_VERSION: 1
+      DYLIB_CURRENT_VERSION: 1
+      INSTALL_PATH: $(LOCAL_LIBRARY_DIR)/Frameworks
+      HEADER_SEARCH_PATHS:
+        - $(SRCROOT)/src/HIAHKernel/Public
+        - $(SRCROOT)/src/HIAHKernel/Core/Hooks
+        - $(SRCROOT)/src/HIAHKernel/Core/Logging
   HIAHProcessRunner:
     type: app-extension
     platform: iOS
@@ -101,20 +119,28 @@ targets:
       - path: src/extension/HIAHBypassStatus.m
       
       # Logging system (shared with extension)
-      - path: src/HIAHDesktop/HIAHLogging.h
-      - path: src/HIAHDesktop/HIAHLogging.m
+      - path: src/HIAHKernel/Public/HIAHLogging.h
+      - path: src/HIAHKernel/Core/Logging/HIAHLogging.m
       
       # Mach-O Utils (shared with extension)
       - path: src/HIAHDesktop/HIAHMachOUtils.h
       - path: src/HIAHDesktop/HIAHMachOUtils.m
       
       # HIAH Hook System (for function interception)
-      - path: src/hooks/HIAHHook.h
-      - path: src/hooks/HIAHHook.c
+      - path: src/HIAHKernel/Core/Hooks/HIAHHook.h
+      - path: src/HIAHKernel/Core/Hooks/HIAHHook.c
       
       # Dyld Bypass System (for code signature bypass)
-      - path: src/hooks/HIAHDyldBypass.h
-      - path: src/hooks/HIAHDyldBypass.m
+      - path: src/HIAHKernel/Core/Hooks/HIAHDyldBypass.h
+      - path: src/HIAHKernel/Core/Hooks/HIAHDyldBypass.m
+      
+      # ZSign - Programmatic signing library (like LiveContainer)
+      # Used for JIT-less mode binary signing without ldid/codesign
+      # ZSign is compiled via Nix as a static library (libzsign.a)
+      # We include the Objective-C wrapper (ZSigner) that provides the API HIAHSigner.m expects
+      # This wrapper is OUR code, not dependency source
+      - path: src/zsign/ZSigner.h
+      - path: src/zsign/ZSigner.mm
     
     settings:
       INFOPLIST_FILE: src/extension/Info.plist
@@ -130,10 +156,43 @@ targets:
       HEADER_SEARCH_PATHS:
         - $(SRCROOT)/src
         - $(SRCROOT)/src/hooks
+        - $(SRCROOT)/dependencies/zsign
+        - $(SRCROOT)/dependencies/zsign/include
+        - $(SRCROOT)/dependencies/zsign/include/zsign
+        - $(SRCROOT)/dependencies/zsign/include/zsign/common
       OTHER_LDFLAGS:
         - -ObjC
         - -Wl,-export_dynamic
+        - -lc++
+        - -L$(SRCROOT)/dependencies/zsign/lib
+        - -lzsign-sim
+      
+      OTHER_LDFLAGS[sdk=iphoneos*]:
+        - -ObjC
+        - -Wl,-export_dynamic
+        - -lc++
+        - -L$(SRCROOT)/dependencies/zsign/lib
+        - -lzsign-ios
+      # Also add library search path for device builds
+      LIBRARY_SEARCH_PATHS[sdk=iphoneos*]:
+        - $(SRCROOT)/dependencies/zsign/lib
       ENABLE_BITCODE: NO
+      
+      # Enable C++ compilation for ZSign (.cpp and .mm files)
+      CLANG_CXX_LANGUAGE_STANDARD: c++17
+      CLANG_CXX_LIBRARY: libc++
+      
+      # ZSign compiler flags
+      # Use conditional compilation to disable OpenSSL code in ad-hoc mode
+      # Since HIAH only uses ZSign for ad-hoc signing (InitAdhoc), we don't need OpenSSL
+      OTHER_CFLAGS:
+        - -Wno-unused-variable
+        - -Wno-unused-function
+        - -Wno-deprecated-declarations
+        - -Wno-error=unused-variable
+        - -Wno-error=unused-function
+        - -Wno-error=deprecated-declarations
+        - -DZSIGN_ADHOC_ONLY=1
       
       # Ensure symbols are exported
       GCC_SYMBOLS_PRIVATE_EXTERN: NO
@@ -178,7 +237,7 @@ targets:
   #
   # To enable VPN functionality, you need either:
   # 1. A paid Apple Developer Program membership
-  # 2. Use the StoreAppsVPN approach (like SideStore does with WireGuard)
+  # 2. Use the StoreAppsVPN approach (like SideStore does with LocalDevVPN)
   #
   # The VPN extension files are kept in: src/HIAHLoginWindow/VPN/Extension/
   # Uncomment this target when you have a paid developer account.
@@ -209,6 +268,9 @@ targets:
         product: AltSign-Static
       - package: Roxas
         product: Roxas
+      - target: HIAHKernel
+        embed: true
+        link: true
     
     info:
       path: src/HIAHDesktop/Info.plist
@@ -238,7 +300,6 @@ targets:
         
         # URL schemes we need to query (required for canOpenURL: to work on iOS)
         LSApplicationQueriesSchemes:
-          - wireguard
           - itms-apps
         
         # Background modes for certificate refresh
@@ -265,10 +326,10 @@ targets:
     
     sources:
       # Core
-      - path: src/HIAHKernel.h
-      - path: src/HIAHKernel.m
-      - path: src/HIAHProcess.h
-      - path: src/HIAHProcess.m
+      # - path: src/HIAHKernel.h
+      # - path: src/HIAHKernel.m
+      # - path: src/HIAHProcess.h
+      # - path: src/HIAHProcess.m
       
       # Desktop
       - path: src/HIAHDesktop
@@ -288,12 +349,15 @@ targets:
       - path: src/HIAHLoginWindow/VPN/HIAHVPNManager.m
       - path: src/HIAHLoginWindow/VPN/HIAHVPN.h
       - path: src/HIAHLoginWindow/VPN/HIAHVPN.m
-      - path: src/HIAHLoginWindow/VPN/WireGuard/HIAHWireGuardManager.h
-      - path: src/HIAHLoginWindow/VPN/WireGuard/HIAHWireGuardManager.m
-      - path: src/HIAHLoginWindow/VPN/WireGuard/HIAHWireGuardSetupViewController.h
-      - path: src/HIAHLoginWindow/VPN/WireGuard/HIAHWireGuardSetupViewController.m
-      - path: src/HIAHLoginWindow/VPN/WireGuard/HIAHVPNSetupViewController.h
-      - path: src/HIAHLoginWindow/VPN/WireGuard/HIAHVPNSetupViewController.m
+      # LocalDevVPN Integration (official SideStore VPN)
+      - path: src/HIAHLoginWindow/VPN/LocalDevVPN/HIAHLocalDevVPNManager.h
+      - path: src/HIAHLoginWindow/VPN/LocalDevVPN/HIAHLocalDevVPNManager.m
+      - path: src/HIAHLoginWindow/VPN/LocalDevVPN/HIAHLocalDevVPNSetupViewController.h
+      - path: src/HIAHLoginWindow/VPN/LocalDevVPN/HIAHLocalDevVPNSetupViewController.m
+      - path: src/HIAHLoginWindow/VPN/HIAHVPNReminderViewController.h
+      - path: src/HIAHLoginWindow/VPN/HIAHVPNReminderViewController.m
+      - path: src/HIAHLoginWindow/VPN/HIAHPrivateAppLauncher.h
+      - path: src/HIAHLoginWindow/VPN/HIAHPrivateAppLauncher.m
       - path: src/HIAHLoginWindow/VPN/MinimuxerBridge.h
       - path: src/HIAHLoginWindow/VPN/MinimuxerBridge.m
       - path: src/HIAHLoginWindow/JIT
@@ -312,16 +376,26 @@ targets:
       # Swift Bridge
       - path: src/HIAHDesktop/HIAHSwiftBridge.swift
       
-      # Minimuxer Swift Bridge (DISABLED - requires libimobiledevice)
-      # The minimuxer library requires libimobiledevice which has API incompatibilities
-      # with the version bundled in AltSign. Once we resolve the libplist version conflict,
-      # uncomment the following lines and add -lminimuxer-sim/-lminimuxer-ios to OTHER_LDFLAGS:
-      # - path: vendor/sidestore/include/SwiftBridgeCore.swift
-      # - path: vendor/sidestore/include/minimuxer.swift
-      # - path: vendor/sidestore/include/minimuxer-helpers.swift
+      # Minimuxer Swift Bridge (for JIT enablement via lockdownd)
+      - path: dependencies/sidestore/include/SwiftBridgeCore.swift
+      - path: dependencies/sidestore/include/minimuxer.swift
+      - path: dependencies/sidestore/include/minimuxer-helpers.swift
       
+      # ============================================================================
+      # libimobiledevice stack (built by Nix, linked as static libraries)
+      # These provide the C symbols that minimuxer's rusty_libimobiledevice expects
+      # Source code is fetched from GitHub by Nix, not stored in this repo
+      # ============================================================================
+      
+      # libplist - AltSign's ldid-core already compiles libplist (older version)
+      # We provide a compatibility shim for newer libplist functions that
+      # minimuxer/libimobiledevice need but AltSign's version doesn't have
+      # This is our code, not dependency source, so we keep it
+      - path: Dependencies/libplist-compat.c
+        compilerFlags:
+          - -w
       # Hooks
-      - path: src/hooks
+      # - path: src/hooks
       
       # Window Server
       - path: src/HIAHWindowServer
@@ -361,36 +435,65 @@ targets:
         - $(SRCROOT)/src
         - $(SRCROOT)/src/**
         - $(SRCROOT)/src/HIAHLoginWindow/VPN
-        - $(SRCROOT)/vendor/sidestore/include
+        - $(SRCROOT)/dependencies/sidestore/include
         # SPM package headers (for bridging header access)
-        - $(SRCROOT)/vendor/local_packages/AltSign/AltSign/include
-        - $(SRCROOT)/vendor/local_packages/Roxas/Sources/Roxas/include
-        - $(SRCROOT)/vendor/local_packages/Roxas/Sources/Roxas/include/Roxas
-        # libimobiledevice headers (disabled until version conflict resolved)
-      
+        - $(SRCROOT)/dependencies/swift-packages/AltSign/AltSign/include
+        - $(SRCROOT)/dependencies/swift-packages/Roxas/Sources/Roxas/include
+        - $(SRCROOT)/dependencies/swift-packages/Roxas/Sources/Roxas/include/Roxas
+        # libimobiledevice stack headers (staged from Nix builds, no source code)
+        # Headers are staged to dependencies/libimobiledevice/include/ by Nix
+        - $(SRCROOT)/dependencies/libimobiledevice/include
+        # Also check legacy Dependencies paths for compatibility during transition
+        - $(SRCROOT)/Dependencies/libplist/include
+        - $(SRCROOT)/Dependencies/libplist/src
+        - $(SRCROOT)/Dependencies/libplist/libcnary/include
+        - $(SRCROOT)/Dependencies/libimobiledevice-glue/include
+        - $(SRCROOT)/Dependencies/libimobiledevice-glue/src
+        - $(SRCROOT)/Dependencies/libusbmuxd/include
+        - $(SRCROOT)/Dependencies/libusbmuxd/src
+        - $(SRCROOT)/Dependencies/libimobiledevice/include
+        - $(SRCROOT)/Dependencies/libimobiledevice/src
+        - $(SRCROOT)/Dependencies/libimobiledevice/common
+        - $(SRCROOT)/Dependencies/libimobiledevice
+        - $(SRCROOT)/Dependencies/libimobiledevice/src
+        - $(SRCROOT)/Dependencies/libimobiledevice/common
+        - $(SRCROOT)/Dependencies/libimobiledevice
+        - $(SRCROOT)/src/HIAHKernel/Public      
       LIBRARY_SEARCH_PATHS:
-        - $(SRCROOT)/vendor/sidestore/lib
+        - $(SRCROOT)/dependencies/sidestore/lib
+        # libimobiledevice stack libraries (staged from Nix builds)
+        - $(SRCROOT)/dependencies/libimobiledevice/lib
+      LIBRARY_SEARCH_PATHS[sdk=iphoneos*]:
+        - $(SRCROOT)/dependencies/sidestore/lib
+        # iOS Device libraries
+        - $(SRCROOT)/dependencies/libimobiledevice/lib-ios
       
       OTHER_LDFLAGS:
         - -lz
         - -ObjC
         - -lem_proxy-sim
-        # NOTE: minimuxer disabled until libimobiledevice version conflict is resolved
-        # - -lminimuxer-sim
+        - -lminimuxer-sim
+        # Link against libimobiledevice stack (built by Nix, no source code)
+        - -L$(SRCROOT)/dependencies/libimobiledevice/lib
+        - -limobiledevice
+        - -lusbmuxd
+        - -limobiledevice-glue
+        - -lplist
         # Suppress linker warnings about version mismatches
-        # These warnings occur because prebuilt libraries contain many object files (.o),
-        # each checked individually. Libraries built with iOS 26.1 SDK are backward compatible with iOS 16.0+.
         - -Wl,-w
       
       OTHER_LDFLAGS[sdk=iphoneos*]:
         - -lz
         - -ObjC
         - -lem_proxy-ios
-        # NOTE: minimuxer disabled until libimobiledevice version conflict is resolved
-        # - -lminimuxer-ios
+        # iOS Device libraries
+        - -L$(SRCROOT)/dependencies/libimobiledevice/lib-ios
+        - -limobiledevice
+        - -lusbmuxd
+        - -limobiledevice-glue
+        - -lplist
+        - -lminimuxer-ios
         # Suppress linker warnings about version mismatches
-        # These warnings occur because prebuilt libraries contain many object files (.o),
-        # each checked individually. Libraries built with iOS 26.1 SDK are backward compatible with iOS 16.0+.
         - -Wl,-w
       
       ENABLE_BITCODE: NO

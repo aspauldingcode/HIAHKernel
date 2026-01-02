@@ -15,9 +15,8 @@
 
 NSNotificationName const HIAHVPNStatusDidChangeNotification = @"HIAHVPNStatusDidChange";
 
-// WireGuard
-static NSString * const kWireGuardAppStoreID = @"1441195209";
-static NSString * const kWireGuardScheme = @"wireguard://";
+// LocalDevVPN (official SideStore VPN)
+static NSString * const kLocalDevVPNAppStoreID = @"1537034084";
 
 // Config (keys must match em_proxy's built-in keys for handshake to work)
 // These are placeholder keys - actual functionality depends on VPN interface existing
@@ -122,7 +121,7 @@ static NSString * const kSetupCompleteKey = @"HIAHVPN.SetupComplete";
     return [paths.firstObject stringByAppendingPathComponent:@".hiah_vpn"];
 }
 
-#pragma mark - WireGuard Config
+#pragma mark - LocalDevVPN Config
 
 - (NSString *)generateConfig {
     return [NSString stringWithFormat:
@@ -163,13 +162,21 @@ static NSString * const kSetupCompleteKey = @"HIAHVPN.SetupComplete";
     HIAHLogEx(HIAH_LOG_INFO, @"VPN", @"Config copied to clipboard");
 }
 
-- (void)openWireGuard {
-    NSURL *url = [NSURL URLWithString:kWireGuardScheme];
-    [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+- (void)openLocalDevVPN {
+    // Use private API to open LocalDevVPN directly by bundle ID
+    Class launcherClass = NSClassFromString(@"HIAHPrivateAppLauncher");
+    SEL openSel = NSSelectorFromString(@"openLocalDevVPN");
+    
+    if (launcherClass && [launcherClass respondsToSelector:openSel]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        [launcherClass performSelector:openSel];
+#pragma clang diagnostic pop
+    }
 }
 
-- (void)installWireGuard {
-    NSString *urlStr = [NSString stringWithFormat:@"itms-apps://apps.apple.com/app/id%@", kWireGuardAppStoreID];
+- (void)installLocalDevVPN {
+    NSString *urlStr = [NSString stringWithFormat:@"itms-apps://apps.apple.com/app/id%@", kLocalDevVPNAppStoreID];
     NSURL *url = [NSURL URLWithString:urlStr];
     [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
 }

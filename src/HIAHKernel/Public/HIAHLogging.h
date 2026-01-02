@@ -88,6 +88,9 @@ static inline void _HIAHLogPrint(HIAHLogSubsystem subsystem, HIAHLogLevel level,
 #define HIAHLogInfo(subsystem, fmt, ...)                                       \
   _HIAHLogPrint(subsystem(), HIAHLogLevelInfo, fmt, ##__VA_ARGS__)
 
+#define HIAHLogWarning(subsystem, fmt, ...)                                    \
+  _HIAHLogPrint(subsystem(), HIAHLogLevelWarning, fmt, ##__VA_ARGS__)
+
 #define HIAHLogError(subsystem, fmt, ...)                                      \
   _HIAHLogPrint(subsystem(), HIAHLogLevelError, fmt, ##__VA_ARGS__)
 

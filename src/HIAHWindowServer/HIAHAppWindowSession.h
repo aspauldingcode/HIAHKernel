@@ -16,7 +16,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property (nonatomic, weak) HIAHProcess *process;
 @property (nonatomic, strong) UIView *contentView;
-@property (nonatomic, strong, nullable) id presenter; // _UIScenePresenter
+@property (nonatomic, weak, nullable) id presenter; // _UIScenePresenter (weak to prevent zombie crashes)
 @property (nonatomic, copy, nullable) NSString *sceneID;
 
 // HIAHWindowSession properties (readonly in protocol, readwrite here)

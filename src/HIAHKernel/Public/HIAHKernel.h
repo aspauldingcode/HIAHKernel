@@ -115,6 +115,20 @@ typedef NS_ENUM(NSInteger, HIAHKernelError) {
  */
 - (void)handleExitForPID:(pid_t)pid exitCode:(int)exitCode;
 
+#pragma mark - JIT Enablement
+
+/**
+ * Enables JIT for an extension process with retry logic.
+ * 
+ * This method attempts to enable JIT for the specified extension process PID,
+ * retrying up to 4 times with increasing delays if the initial attempt fails.
+ * This is necessary because JIT enablement via minimuxer can be flaky and
+ * may require multiple attempts.
+ *
+ * @param pid The physical PID of the extension process
+ */
+- (void)enableJITForExtensionProcessWithRetries:(pid_t)pid;
+
 #pragma mark - Process Spawning
 
 /**

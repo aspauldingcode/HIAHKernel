@@ -51,7 +51,7 @@ let
       fi
       
       export ARCH="$SIMULATOR_ARCH"
-      export CFLAGS="-arch $SIMULATOR_ARCH -isysroot $SDKROOT -mios-simulator-version-min=15.0 -fPIC -fobjc-arc -I$PWD/src"
+      export CFLAGS="-arch $ARCH -isysroot $SDKROOT -mios-simulator-version-min=15.0 -fPIC -fobjc-arc -I$PWD/src -I$PWD/src/HIAHKernel/Public"
       export OBJCFLAGS="$CFLAGS"
       export LDFLAGS="-arch $SIMULATOR_ARCH -isysroot $SDKROOT -mios-simulator-version-min=15.0 -framework Foundation -framework UIKit"
     '';
@@ -63,23 +63,23 @@ let
       
       # Build HIAHHook
       echo "Compiling HIAHHook.c..."
-      $CC -c src/hooks/HIAHHook.c -o HIAHHook.o $CFLAGS -O2
+      $CC -c src/HIAHKernel/Core/Hooks/HIAHHook.c -o HIAHHook.o $CFLAGS -O2
       
       # Build HIAHGuestHooks
       echo "Compiling HIAHGuestHooks.m..."
-      $CC -c src/hooks/HIAHGuestHooks.m -o HIAHGuestHooks.o $OBJCFLAGS -O2
+      $CC -c src/HIAHKernel/Core/Hooks/HIAHGuestHooks.m -o HIAHGuestHooks.o $OBJCFLAGS -O2
       
       # Build HIAHProcess
       echo "Compiling HIAHProcess.m..."
-      $CC -c src/HIAHProcess.m -o HIAHProcess.o $OBJCFLAGS -O2
+      $CC -c src/HIAHKernel/Core/HIAHProcess.m -o HIAHProcess.o $OBJCFLAGS -O2
       
       # Build HIAHLogging (Kernel logger)
       echo "Compiling HIAHLogging.m..."
-      $CC -c src/HIAHDesktop/HIAHLogging.m -o HIAHLogging.o $OBJCFLAGS -O2
+      $CC -c src/HIAHKernel/Core/Logging/HIAHLogging.m -o HIAHLogging.o $OBJCFLAGS -O2
       
       # Build HIAHKernel
       echo "Compiling HIAHKernel.m..."
-      $CC -c src/HIAHKernel.m -o HIAHKernel.o $OBJCFLAGS -O2
+      $CC -c src/HIAHKernel/Core/HIAHKernel.m -o HIAHKernel.o $OBJCFLAGS -O2
       
       # Create static library
       echo "Creating static library libHIAHKernel.a..."
@@ -107,10 +107,10 @@ let
       cp libHIAHKernel.dylib $out/lib/
       
       # Install headers
-      cp src/HIAHKernel.h $out/include/HIAHKernel/
-      cp src/HIAHProcess.h $out/include/HIAHKernel/
-      cp src/hooks/HIAHHook.h $out/include/HIAHKernel/
-      cp src/hooks/HIAHGuestHooks.h $out/include/HIAHKernel/
+      cp src/HIAHKernel/Public/HIAHKernel.h $out/include/HIAHKernel/
+      cp src/HIAHKernel/Public/HIAHProcess.h $out/include/HIAHKernel/
+      cp src/HIAHKernel/Core/Hooks/HIAHHook.h $out/include/HIAHKernel/
+      cp src/HIAHKernel/Core/Hooks/HIAHGuestHooks.h $out/include/HIAHKernel/
       
       # Install extension source (for bundling)
       cp -r src/extension/* $out/share/HIAHKernel/extension/

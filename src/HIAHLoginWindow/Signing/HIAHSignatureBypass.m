@@ -13,6 +13,7 @@
 #import "HIAHSignatureBypass.h"
 #import "HIAHBypassCoordinator.h"
 #import "../VPN/HIAHVPNManager.h"
+#import "../VPN/HIAHVPNStateMachine.h"
 #import "../JIT/HIAHJITManager.h"
 #import "../../HIAHDesktop/HIAHLogging.h"
 #import "../../extension/HIAHSigner.h"
@@ -50,40 +51,44 @@
         HIAHLogEx(HIAH_LOG_INFO, @"SignatureBypass", @"Ensuring bypass is ready...");
         
         // Step 1: Start VPN if not already active
+        // BUT: Only if VPN setup has been completed. Don't auto-open LocalDevVPN during initial setup.
+        HIAHVPNStateMachine *vpnSM = [HIAHVPNStateMachine shared];
         HIAHVPNManager *vpnManager = [HIAHVPNManager sharedManager];
+        
+        // Check if VPN setup is complete before trying to start VPN
+        if (!vpnSM.isSetupComplete) {
+            HIAHLogEx(HIAH_LOG_INFO, @"SignatureBypass", @"VPN setup not complete - skipping auto-start. User must complete setup wizard first.");
+            if (completion) {
+                completion(NO, [NSError errorWithDomain:@"SignatureBypass" 
+                                                   code:-1 
+                                               userInfo:@{NSLocalizedDescriptionKey: @"VPN setup not complete. Please complete the LocalDevVPN setup wizard first."}]);
+            }
+            return;
+        }
+        
         if (!vpnManager.isVPNActive) {
             HIAHLogEx(HIAH_LOG_INFO, @"SignatureBypass", @"Starting VPN...");
             
             dispatch_semaphore_t vpnSem = dispatch_semaphore_create(0);
             __block NSError *vpnError = nil;
             
-            [vpnManager startVPNWithCompletion:^(NSError * _Nullable error) {
-                vpnError = error;
-                dispatch_semaphore_signal(vpnSem);
-            }];
+            // Don't call startVPN - it opens LocalDevVPN automatically
+            // Instead, just check if VPN is connected
+            HIAHLogEx(HIAH_LOG_INFO, @"SignatureBypass", @"Checking if VPN is connected...");
             
-            // Wait for VPN to start (max 30 seconds)
-            dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC);
-            if (dispatch_semaphore_wait(vpnSem, timeout) != 0) {
-                HIAHLogEx(HIAH_LOG_ERROR, @"SignatureBypass", @"VPN start timeout");
+            // Check if VPN is actually connected (user may have enabled it manually)
+            if (![vpnSM detectHIAHVPNConnected]) {
+                HIAHLogEx(HIAH_LOG_INFO, @"SignatureBypass", @"VPN not connected - user needs to enable it in LocalDevVPN. Not auto-opening LocalDevVPN.");
                 if (completion) {
                     completion(NO, [NSError errorWithDomain:@"SignatureBypass" 
                                                        code:-1 
-                                                   userInfo:@{NSLocalizedDescriptionKey: @"VPN start timeout"}]);
+                                                   userInfo:@{NSLocalizedDescriptionKey: @"VPN is not connected. Please enable the VPN in LocalDevVPN."}]);
                 }
                 return;
             }
             
-            if (vpnError) {
-                HIAHLogEx(HIAH_LOG_ERROR, @"SignatureBypass", @"VPN start failed: %@", vpnError);
-                if (completion) {
-                    completion(NO, vpnError);
-                }
-                return;
-            }
-            
-            // Give VPN a moment to establish connection
-            [NSThread sleepForTimeInterval:1.0];
+            // VPN is connected
+            HIAHLogEx(HIAH_LOG_INFO, @"SignatureBypass", @"VPN is connected - proceeding");
             
             // Update coordinator
             [[HIAHBypassCoordinator sharedCoordinator] updateVPNStatus:YES];

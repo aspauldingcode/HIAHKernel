@@ -102,6 +102,12 @@ class HIAHLoginViewController: UIViewController {
             return
         }
         
+        // Check if VPN is active - must be OFF before signing in
+        if checkVPNStatus() {
+            showVPNMustBeOffAlert()
+            return
+        }
+        
         startLoading()
         
         // Set up 2FA handler before login
@@ -135,8 +141,7 @@ class HIAHLoginViewController: UIViewController {
             } catch {
                 await MainActor.run {
                     self.stopLoading()
-                    self.statusLabel.text = "❌ Error: \(error.localizedDescription)"
-                    self.statusLabel.textColor = .systemRed
+                    self.handleLoginError(error)
                 }
             }
         }
@@ -181,5 +186,115 @@ class HIAHLoginViewController: UIViewController {
         loginButton.isEnabled = true
         loginButton.alpha = 1.0
         activityIndicator.stopAnimating()
+    }
+    
+    private func handleLoginError(_ error: Error) {
+        statusLabel.text = "❌ Error: \(error.localizedDescription)"
+        statusLabel.textColor = .systemRed
+        
+        // Check for specific errors that need special handling
+        if let altSignError = error as? AltSignError {
+            switch altSignError {
+            case .anisetteServerTimeout:
+                showAnisetteTimeoutAlert()
+            case .invalidAnisetteData:
+                showAnisetteFailedAlert()
+            default:
+                break
+            }
+        }
+        
+        // Check for network errors
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut, .networkConnectionLost, .notConnectedToInternet:
+                showNetworkErrorAlert(error: urlError)
+            default:
+                break
+            }
+        }
+    }
+    
+    private func showAnisetteTimeoutAlert() {
+        let alert = UIAlertController(
+            title: "Anisette Server Timeout",
+            message: "The authentication servers timed out.\n\n⚠️ If you have HIAH-VPN enabled, try disabling it temporarily in LocalDevVPN before signing in.\n\nThe VPN can interfere with connections to Apple's authentication servers.",
+            preferredStyle: .alert
+        )
+        
+        // Open Settings where user can disable VPN (LocalDevVPN doesn't have a URL scheme)
+        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
+            }
+        })
+        
+        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        
+        present(alert, animated: true)
+    }
+    
+    private func showAnisetteFailedAlert() {
+        let alert = UIAlertController(
+            title: "Authentication Failed",
+            message: "Could not connect to Anisette servers. This is required for Apple Account authentication.\n\nPlease check:\n• Your internet connection is working\n• Try again in a few minutes\n• If using VPN, try disabling it temporarily",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        
+        present(alert, animated: true)
+    }
+    
+    private func showNetworkErrorAlert(error: URLError) {
+        let message: String
+        switch error.code {
+        case .notConnectedToInternet:
+            message = "No internet connection. Please check your network settings and try again."
+        case .timedOut:
+            message = "The connection timed out. Please try again."
+        case .networkConnectionLost:
+            message = "Network connection was lost. Please try again."
+        default:
+            message = "A network error occurred: \(error.localizedDescription)"
+        }
+        
+        let alert = UIAlertController(
+            title: "Network Error",
+            message: message,
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        
+        present(alert, animated: true)
+    }
+    
+    /// Check if VPN is currently active
+    /// NOTE: This only checks the state, not the actual connection (fast, non-blocking)
+    private func checkVPNStatus() -> Bool {
+        // Use HIAHVPNStateMachine to check state (fast, doesn't call detectHIAHVPNConnected)
+        // This avoids blocking the main thread during text input
+        let vpnSM = HIAHVPNStateMachine.shared()
+        return vpnSM.isConnected
+    }
+    
+    /// Show alert warning user that VPN must be OFF before signing in
+    private func showVPNMustBeOffAlert() {
+        let alert = UIAlertController(
+            title: "VPN Must Be Disabled",
+            message: "Please disable HIAH-VPN in LocalDevVPN before signing in.\n\nThe VPN can interfere with Apple's authentication servers.",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
+            }
+        })
+        
+        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        
+        present(alert, animated: true)
     }
 }

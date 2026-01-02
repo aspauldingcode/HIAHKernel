@@ -72,12 +72,20 @@
     // Ensure content view matches bounds
     self.contentView.frame = self.view.bounds;
     
-    // Update presenter view if it exists
-    if (self.presenter) {
-        UIView *presentationView = [self.presenter performSelector:@selector(presentationView)];
+    // Update presenter view if it exists (early return if nil to prevent zombie access)
+    id presenter = self.presenter; // Capture weak reference
+    if (!presenter) {
+        return;
+    }
+    
+    @try {
+        UIView *presentationView = [presenter performSelector:@selector(presentationView)];
         if (presentationView) {
             presentationView.frame = self.contentView.bounds;
         }
+    } @catch (NSException *exception) {
+        NSLog(@"[HIAHWindowSession] ⚠️ Presenter appears to be invalid in viewDidLayoutSubviews: %@", exception);
+        self.presenter = nil; // Clear invalid reference
     }
 }
 
@@ -491,13 +499,18 @@
     [self.presenter activate];
     
     // Add presentation view to content view
-    UIView *presentationView = [self.presenter presentationView];
-    if (presentationView) {
-        [self.contentView addSubview:presentationView];
-        presentationView.frame = self.contentView.bounds;
-        presentationView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    } else {
-        NSLog(@"[HIAHWindowSession] ⚠️ No presentation view from presenter");
+    @try {
+        UIView *presentationView = [self.presenter performSelector:@selector(presentationView)];
+        if (presentationView) {
+            [self.contentView addSubview:presentationView];
+            presentationView.frame = self.contentView.bounds;
+            presentationView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        } else {
+            NSLog(@"[HIAHWindowSession] ⚠️ No presentation view from presenter");
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"[HIAHWindowSession] ⚠️ Error getting presentation view: %@", exception);
+        self.presenter = nil; // Clear invalid reference
     }
     
     self.contentView.layer.anchorPoint = CGPointMake(0, 0);
@@ -522,14 +535,25 @@
 }
 
 - (void)closeWindowWithScene:(UIWindowScene *)windowScene withFrame:(CGRect)rect {
-    if (self.sceneID) {
-        [windowScene _unregisterSettingsDiffActionArrayForKey:self.sceneID];
+    // CRITICAL: Invalidate and nil presenter FIRST to prevent zombie access
+    id presenter = self.presenter; // Capture weak reference
+    self.presenter = nil; // Set to nil IMMEDIATELY to prevent zombie access
+    
+    if (presenter) {
+        @try {
+            [presenter deactivate];
+        } @catch (NSException *exception) {
+            NSLog(@"[HIAHWindowSession] Error deactivating presenter during close: %@", exception);
+        }
+        @try {
+            [presenter invalidate];
+        } @catch (NSException *exception) {
+            NSLog(@"[HIAHWindowSession] Error invalidating presenter during close: %@", exception);
+        }
     }
     
-    if (self.presenter) {
-        [self.presenter deactivate];
-        [self.presenter invalidate];
-        self.presenter = nil;
+    if (self.sceneID) {
+        [windowScene _unregisterSettingsDiffActionArrayForKey:self.sceneID];
     }
     
     // Destroy scene with proper cleanup to prevent reconnect errors
@@ -587,25 +611,46 @@
 }
 
 - (UIImage *)snapshotWindow {
-    // Return snapshot of the presentation view
-    if (self.presenter) {
-        UIView *presentationView = [self.presenter presentationView];
+    // Early return if presenter is nil (prevents zombie access)
+    id presenter = self.presenter;
+    if (!presenter) {
+        return nil;
+    }
+    
+    @try {
+        UIView *presentationView = [presenter performSelector:@selector(presentationView)];
+        if (!presentationView) {
+            return nil;
+        }
         UIGraphicsBeginImageContextWithOptions(presentationView.bounds.size, NO, 0);
         [presentationView.layer renderInContext:UIGraphicsGetCurrentContext()];
         UIImage *snapshot = UIGraphicsGetImageFromCurrentImageContext();
         UIGraphicsEndImageContext();
         return snapshot;
+    } @catch (NSException *exception) {
+        NSLog(@"[HIAHWindowSession] ⚠️ Presenter appears to be invalid in snapshotWindow: %@", exception);
+        self.presenter = nil; // Clear invalid reference
+        return nil;
     }
-    return nil;
 }
 
 - (void)activateWindow {
-    if (!self.presenter) {
+    // Early return if presenter is nil (prevents zombie access)
+    id presenter = self.presenter;
+    if (!presenter) {
+        return;
+    }
+    
+    // Ensure we're on main thread
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self activateWindow];
+        });
         return;
     }
     
     @try {
-        id scene = [self.presenter scene];
+        id scene = [presenter scene];
         if (scene && [scene respondsToSelector:@selector(updateSettingsWithBlock:)]) {
             [scene updateSettingsWithBlock:^(id settings) {
                 if ([settings respondsToSelector:@selector(setForeground:)]) {
@@ -613,25 +658,44 @@
                 }
             }];
         }
-        [self.presenter activate];
+        [presenter activate];
     } @catch (NSException *exception) {
         NSLog(@"[HIAHWindowSession] Error activating window: %@", exception.reason);
+        // Presenter may be invalid - clear reference
+        if ([exception.name isEqualToString:NSInvalidArgumentException] || 
+            [exception.reason containsString:@"zombie"] ||
+            [exception.reason containsString:@"deallocated"]) {
+            NSLog(@"[HIAHWindowSession] ⚠️ Presenter appears to be a zombie - clearing reference");
+            self.presenter = nil;
+            return;
+        }
         // Still try to activate presenter even if settings update fails
         @try {
-            [self.presenter activate];
+            [presenter activate];
         } @catch (NSException *e) {
             NSLog(@"[HIAHWindowSession] Error activating presenter: %@", e.reason);
+            self.presenter = nil; // Clear invalid reference
         }
     }
 }
 
 - (void)deactivateWindow {
-    if (!self.presenter) {
+    // Early return if presenter is nil (prevents zombie access)
+    id presenter = self.presenter;
+    if (!presenter) {
+        return;
+    }
+    
+    // Ensure we're on main thread
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self deactivateWindow];
+        });
         return;
     }
     
     @try {
-        id scene = [self.presenter scene];
+        id scene = [presenter scene];
         if (scene && [scene respondsToSelector:@selector(updateSettingsWithBlock:)]) {
             [scene updateSettingsWithBlock:^(id settings) {
                 if ([settings respondsToSelector:@selector(setForeground:)]) {
@@ -639,25 +703,44 @@
                 }
             }];
         }
-        [self.presenter deactivate];
+        [presenter deactivate];
     } @catch (NSException *exception) {
         NSLog(@"[HIAHWindowSession] Error deactivating window: %@", exception.reason);
+        // Presenter may be invalid - clear reference
+        if ([exception.name isEqualToString:NSInvalidArgumentException] || 
+            [exception.reason containsString:@"zombie"] ||
+            [exception.reason containsString:@"deallocated"]) {
+            NSLog(@"[HIAHWindowSession] ⚠️ Presenter appears to be a zombie - clearing reference");
+            self.presenter = nil;
+            return;
+        }
         // Still try to deactivate presenter even if settings update fails
         @try {
-            [self.presenter deactivate];
+            [presenter deactivate];
         } @catch (NSException *e) {
             NSLog(@"[HIAHWindowSession] Error deactivating presenter: %@", e.reason);
+            self.presenter = nil; // Clear invalid reference
         }
     }
 }
 
 - (void)windowChangesSizeToRect:(CGRect)rect {
-    if (!self.presenter) {
+    // Early return if presenter is nil (prevents zombie access)
+    id presenter = self.presenter;
+    if (!presenter) {
+        return;
+    }
+    
+    // Ensure we're on main thread
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self windowChangesSizeToRect:rect];
+        });
         return;
     }
     
     @try {
-        id scene = [self.presenter scene];
+        id scene = [presenter scene];
         if (!scene || ![scene respondsToSelector:@selector(updateSettingsWithBlock:)]) {
             return;
         }
@@ -709,9 +792,15 @@
                          fromSettings:(id)settings 
                     transitionContext:(id)context 
                   lifecycleActionType:(uint32_t)actionType {
+    // Early return if presenter is nil (prevents zombie access)
+    id presenter = self.presenter;
+    if (!presenter) {
+        return;
+    }
+    
     // Handle scene settings updates
     // Note: Some scenes don't support reconnect/updates, so we need to be careful
-    if (!diff || !self.presenter) {
+    if (!diff) {
         return;
     }
     
@@ -726,7 +815,7 @@
             return;
         }
         
-        id presenterScene = [self.presenter scene];
+        id presenterScene = [presenter scene];
         if (!presenterScene) {
             return;
         }
@@ -747,7 +836,110 @@
         }
         
         // Attempt to update settings with error handling
-        [presenterScene updateSettings:baseSettings withTransitionContext:context completion:nil];
+        // CRITICAL: Add comprehensive defensive checks before calling updateSettings
+        // This prevents crashes from zombie objects, wrong types, or invalid state
+        
+        // 1. Check if we're on the main thread (UIKit requirement)
+        if (![NSThread isMainThread]) {
+            NSLog(@"[HIAHWindowSession] ⚠️ WARNING: _performActionsForUIScene called off main thread - dispatching to main");
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self _performActionsForUIScene:scene withUpdatedFBSScene:fbsScene settingsDiff:diff fromSettings:settings transitionContext:context lifecycleActionType:actionType];
+            });
+            return;
+        }
+        
+        // 2. Validate presenterScene exists and is not a zombie
+        if (!presenterScene) {
+            NSLog(@"[HIAHWindowSession] ⚠️ Cannot update scene settings - presenterScene is nil");
+            return;
+        }
+        
+        // 3. Validate baseSettings exists
+        if (!baseSettings) {
+            NSLog(@"[HIAHWindowSession] ⚠️ Cannot update scene settings - baseSettings is nil");
+            return;
+        }
+        
+        // 4. Validate context exists
+        if (!context) {
+            NSLog(@"[HIAHWindowSession] ⚠️ Cannot update scene settings - context is nil");
+            return;
+        }
+        
+        // 5. Log object types and pointers for debugging
+        NSLog(@"[HIAHWindowSession] Updating scene settings:");
+        NSLog(@"[HIAHWindowSession]   presenterScene: %p (class: %@)", presenterScene, [presenterScene class]);
+        NSLog(@"[HIAHWindowSession]   baseSettings: %p (class: %@)", baseSettings, [baseSettings class]);
+        NSLog(@"[HIAHWindowSession]   context: %p (class: %@)", context, [context class]);
+        NSLog(@"[HIAHWindowSession]   Thread: %@ (main: %@)", [NSThread currentThread], [NSThread isMainThread] ? @"YES" : @"NO");
+        
+        // 6. Verify presenterScene is actually an FBScene (or responds to the selector)
+        if (![presenterScene respondsToSelector:@selector(updateSettings:withTransitionContext:completion:)]) {
+            NSLog(@"[HIAHWindowSession] ⚠️ presenterScene does not respond to updateSettings:withTransitionContext:completion: (class: %@)", [presenterScene class]);
+            return;
+        }
+        
+        // 7. Final safety check - ensure objects are still valid
+        @try {
+            // Try to access a property to verify object is not a zombie
+            (void)[presenterScene description];
+            (void)[baseSettings description];
+            (void)[context description];
+        } @catch (NSException *exception) {
+            NSLog(@"[HIAHWindowSession] ⚠️ CRITICAL: Object appears to be a zombie - aborting update");
+            NSLog(@"[HIAHWindowSession]   Exception: %@", exception);
+            return;
+        }
+        
+        // 8. Check if scene supports reconnect before attempting update
+        // Some scenes (like extension-based scenes) don't support reconnect/updates
+        // Attempting to update them will cause an assertion failure
+        // CRITICAL: All HIAHKernel scenes are extension-based and don't support reconnect
+        // Check our own sceneID first (most reliable)
+        if (self.sceneID && [self.sceneID containsString:@"HIAHKernel:"]) {
+            // Extension-based scenes don't support reconnect - skip update to prevent crash
+            NSLog(@"[HIAHWindowSession] ℹ️ Skipping scene update for extension-based scene (does not support reconnect): %@", self.sceneID);
+            return;
+        }
+        
+        // Also check presenterScene identifier if available (fallback)
+        NSString *sceneIdentifier = nil;
+        if ([presenterScene respondsToSelector:@selector(identifier)]) {
+            sceneIdentifier = [presenterScene identifier];
+        } else if ([presenterScene respondsToSelector:@selector(persistentIdentifier)]) {
+            sceneIdentifier = [presenterScene persistentIdentifier];
+        }
+        
+        if (sceneIdentifier && [sceneIdentifier containsString:@"HIAHKernel:"]) {
+            // Extension-based scenes don't support reconnect - skip update to prevent crash
+            NSLog(@"[HIAHWindowSession] ℹ️ Skipping scene update for extension-based scene (does not support reconnect): %@", sceneIdentifier);
+            return;
+        }
+        
+        // 9. Attempt the update with full error handling
+        @try {
+            NSLog(@"[HIAHWindowSession] Calling updateSettings:withTransitionContext:completion:...");
+            [presenterScene updateSettings:baseSettings withTransitionContext:context completion:nil];
+            NSLog(@"[HIAHWindowSession] ✅ Scene settings updated successfully");
+        } @catch (NSException *exception) {
+            // Scene doesn't support reconnect/updates - this is expected for some scene types
+            // This is NOT a crash - it's a known limitation. Just log and continue.
+            NSString *reason = exception.reason ?: @"";
+            if ([reason containsString:@"does not support reconnect"] ||
+                [reason containsString:@"not derived from the scene's previous settings"] ||
+                [reason containsString:@"workspace.*does not support reconnect"]) {
+                NSLog(@"[HIAHWindowSession] ℹ️ Scene does not support reconnect/updates (expected for this scene type) - skipping update");
+                NSLog(@"[HIAHWindowSession]   Reason: %@", reason);
+                // This is normal - some scenes can't be updated after creation
+                return;
+            }
+            NSLog(@"[HIAHWindowSession] ⚠️ Scene update failed: %@", reason);
+            NSLog(@"[HIAHWindowSession]   Exception name: %@", exception.name);
+            NSLog(@"[HIAHWindowSession]   Exception userInfo: %@", exception.userInfo);
+        } @catch (...) {
+            // Catch any C++ exceptions or other non-NSException errors
+            NSLog(@"[HIAHWindowSession] ⚠️ Scene update failed with unknown exception");
+        }
     } @catch (NSException *exception) {
         // Scene doesn't support reconnect/updates - this is expected for some scene types
         // Silently ignore to prevent crashes
@@ -808,16 +1000,22 @@ static const NSInteger kPlaceholderTag = 99887766;
     // Check if presenter has actual content
     BOOL hasContent = NO;
     
-    if (self.presenter) {
-        UIView *presentationView = [self.presenter presentationView];
-        if (presentationView && presentationView.subviews.count > 0) {
-            // Check if any subview has non-zero size
-            for (UIView *subview in presentationView.subviews) {
-                if (!CGSizeEqualToSize(subview.frame.size, CGSizeZero)) {
-                    hasContent = YES;
-                    break;
+    id presenter = self.presenter;
+    if (presenter) {
+        @try {
+            UIView *presentationView = [presenter performSelector:@selector(presentationView)];
+            if (presentationView && presentationView.subviews.count > 0) {
+                // Check if any subview has non-zero size
+                for (UIView *subview in presentationView.subviews) {
+                    if (!CGSizeEqualToSize(subview.frame.size, CGSizeZero)) {
+                        hasContent = YES;
+                        break;
+                    }
                 }
             }
+        } @catch (NSException *exception) {
+            NSLog(@"[HIAHWindowSession] ⚠️ Presenter appears to be invalid in hasContent: %@", exception);
+            self.presenter = nil; // Clear invalid reference
         }
     }
     

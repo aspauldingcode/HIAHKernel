@@ -1,10 +1,9 @@
 /**
  * HIAHMinimuxerJIT.swift
- * HIAH LoginWindow - JIT Enablement via Minimuxer (STUB)
+ * HIAH LoginWindow - JIT Enablement via Minimuxer
  *
- * NOTE: Minimuxer is currently DISABLED because it requires
- * libimobiledevice to be built for iOS. This file provides stub
- * implementations that return appropriate errors.
+ * Provides JIT enablement functionality using the minimuxer library.
+ * JIT is enabled by attaching a debugger to the target process.
  *
  * Copyright (c) 2025 Alex Spaulding
  * Licensed under AGPLv3
@@ -15,7 +14,7 @@ import Foundation
 /// Errors that can occur during JIT enablement
 public enum HIAHJITError: Error, LocalizedError {
     case minimuxerNotStarted
-    case minimuxerDisabled
+    case minimuxerNotReady
     case noPairingFile
     case vpnNotConnected
     case debugFailed(String)
@@ -25,12 +24,12 @@ public enum HIAHJITError: Error, LocalizedError {
         switch self {
         case .minimuxerNotStarted:
             return "Minimuxer service not started. Call startMinimuxer() first."
-        case .minimuxerDisabled:
-            return "Minimuxer is disabled (requires libimobiledevice). Using alternative JIT methods."
+        case .minimuxerNotReady:
+            return "Minimuxer not ready. Check device connection and VPN status."
         case .noPairingFile:
             return "No pairing file found. Device must be paired with a computer first."
         case .vpnNotConnected:
-            return "VPN not connected. Enable WireGuard VPN first."
+            return "VPN not connected. Enable LocalDevVPN first."
         case .debugFailed(let msg):
             return "Failed to enable JIT for app: \(msg)"
         case .attachFailed(let msg):
@@ -39,64 +38,157 @@ public enum HIAHJITError: Error, LocalizedError {
     }
 }
 
-/// Manages JIT enablement via Minimuxer (STUB VERSION)
+/// Manages JIT enablement via Minimuxer
 /// 
-/// NOTE: Minimuxer is disabled. All methods return errors indicating
-/// that minimuxer is not available.
+/// JIT is enabled by attaching a debugger to the target process via lockdownd.
+/// This requires:
+/// 1. A valid pairing file from a trusted computer
+/// 2. The em_proxy VPN tunnel to be connected
+/// 3. Minimuxer service to be started
 @objc public class HIAHMinimuxerJIT: NSObject {
     
     /// Shared instance
     @objc public static let shared = HIAHMinimuxerJIT()
     
-    /// Whether minimuxer has been started (always false - disabled)
+    /// Whether minimuxer has been started
     @objc public private(set) var isStarted = false
     
     /// Notification posted when JIT is successfully enabled
     @objc public static let JITEnabledNotification = Notification.Name("HIAHJITEnabled")
     
+    /// Notification posted when JIT enablement fails
+    @objc public static let JITFailedNotification = Notification.Name("HIAHJITFailed")
+    
+    private let minimuxer = HIAHMinimuxer.shared
+    
     private override init() {
         super.init()
-        print("[MinimuxerJIT] ⚠️ STUB: Minimuxer JIT is disabled (requires libimobiledevice)")
+        print("[MinimuxerJIT] Initialized")
     }
     
-    // MARK: - Minimuxer Lifecycle (STUB)
+    // MARK: - Minimuxer Lifecycle
     
     /// Starts the minimuxer service
-    /// NOTE: This is a stub - minimuxer is disabled
-    @objc public func startMinimuxer(pairingFile: String, logPath: String, consoleLogging: Bool = false) throws {
-        print("[MinimuxerJIT] ⚠️ STUB: startMinimuxer() called but minimuxer is disabled")
-        throw HIAHJITError.minimuxerDisabled
+    /// - Parameters:
+    ///   - pairingFile: Path to the mobiledevicepairing file
+    ///   - logPath: Optional path for log output
+    ///   - consoleLogging: Whether to enable console logging
+    @objc public func startMinimuxer(pairingFile: String, logPath: String = "", consoleLogging: Bool = false) throws {
+        print("[MinimuxerJIT] Starting minimuxer...")
+        
+        let success = minimuxer.initialize(
+            pairingFile: pairingFile,
+            logPath: logPath.isEmpty ? nil : logPath,
+            consoleLogging: consoleLogging
+        )
+        
+        if success {
+            isStarted = true
+            print("[MinimuxerJIT] ✅ Minimuxer started successfully")
+        } else {
+            let error = minimuxer.lastErrorMessage ?? "Unknown error"
+            print("[MinimuxerJIT] ❌ Failed to start minimuxer: \(error)")
+            throw HIAHJITError.debugFailed(error)
+        }
     }
     
-    /// Checks if minimuxer is ready (always false - disabled)
+    /// Starts minimuxer with the default pairing file
+    @objc public func startMinimuxerWithDefaultPairing() throws {
+        guard let pairingFile = HIAHMinimuxer.defaultPairingFilePath() else {
+            throw HIAHJITError.noPairingFile
+        }
+        try startMinimuxer(pairingFile: pairingFile)
+    }
+    
+    /// Checks if minimuxer is ready
     @objc public var isReady: Bool {
-        return false
+        return minimuxer.isReady
     }
     
-    /// Checks if device is connected (always false - disabled)
+    /// Checks if device is connected
     @objc public var isDeviceConnected: Bool {
-        return false
+        return minimuxer.testDeviceConnection()
     }
     
-    /// Gets the device UDID (always nil - disabled)
+    /// Gets the device UDID
     @objc public var deviceUDID: String? {
-        return nil
+        return minimuxer.fetchDeviceUDID()
     }
     
-    // MARK: - JIT Enablement (STUB)
+    // MARK: - JIT Enablement
     
     /// Enables JIT for an app by bundle ID
-    /// NOTE: This is a stub - minimuxer is disabled
+    /// - Parameter bundleID: The bundle identifier of the app
     @objc public func enableJIT(forBundleID bundleID: String) throws {
-        print("[MinimuxerJIT] ⚠️ STUB: enableJIT() called for \(bundleID) but minimuxer is disabled")
-        throw HIAHJITError.minimuxerDisabled
+        print("[MinimuxerJIT] Enabling JIT for: \(bundleID)")
+        
+        // Check prerequisites
+        guard isStarted else {
+            throw HIAHJITError.minimuxerNotStarted
+        }
+        
+        guard isReady else {
+            throw HIAHJITError.minimuxerNotReady
+        }
+        
+        do {
+            try minimuxer.enableJIT(forBundleID: bundleID)
+            
+            // Post success notification
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: HIAHMinimuxerJIT.JITEnabledNotification,
+                    object: self,
+                    userInfo: ["bundleID": bundleID]
+                )
+            }
+            
+            print("[MinimuxerJIT] ✅ JIT enabled for \(bundleID)")
+        } catch {
+            let message = error.localizedDescription
+            
+            // Post failure notification
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: HIAHMinimuxerJIT.JITFailedNotification,
+                    object: self,
+                    userInfo: ["bundleID": bundleID, "error": message]
+                )
+            }
+            
+            throw HIAHJITError.debugFailed(message)
+        }
     }
     
     /// Enables JIT for a process by PID
-    /// NOTE: This is a stub - minimuxer is disabled
+    /// - Parameter pid: The process ID
     @objc public func enableJIT(forPID pid: UInt32) throws {
-        print("[MinimuxerJIT] ⚠️ STUB: enableJIT() called for PID \(pid) but minimuxer is disabled")
-        throw HIAHJITError.minimuxerDisabled
+        print("[MinimuxerJIT] Enabling JIT for PID: \(pid)")
+        
+        guard isStarted else {
+            throw HIAHJITError.minimuxerNotStarted
+        }
+        
+        guard isReady else {
+            throw HIAHJITError.minimuxerNotReady
+        }
+        
+        do {
+            try minimuxer.attachDebugger(toPID: pid)
+            
+            // Post success notification
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: HIAHMinimuxerJIT.JITEnabledNotification,
+                    object: self,
+                    userInfo: ["pid": pid]
+                )
+            }
+            
+            print("[MinimuxerJIT] ✅ JIT enabled for PID \(pid)")
+        } catch {
+            throw HIAHJITError.attachFailed(error.localizedDescription)
+        }
     }
     
     // MARK: - Pairing File Management
@@ -109,13 +201,13 @@ public enum HIAHJITError: Error, LocalizedError {
     
     /// Checks if a pairing file exists
     @objc public var hasPairingFile: Bool {
-        return FileManager.default.fileExists(atPath: pairingFilePath)
+        return HIAHMinimuxer.hasPairingFile()
     }
     
     /// Loads the pairing file contents
     @objc public func loadPairingFile() -> String? {
-        guard hasPairingFile else { return nil }
-        return try? String(contentsOfFile: pairingFilePath, encoding: .utf8)
+        guard let path = HIAHMinimuxer.defaultPairingFilePath() else { return nil }
+        return try? String(contentsOfFile: path, encoding: .utf8)
     }
     
     /// Saves a pairing file
@@ -124,15 +216,15 @@ public enum HIAHJITError: Error, LocalizedError {
         print("[MinimuxerJIT] Pairing file saved")
     }
     
-    // MARK: - Stub Status
+    // MARK: - Availability
     
-    /// Check if minimuxer-based JIT is available (always false for stub)
+    /// Check if minimuxer-based JIT is available
     @objc public class func isAvailable() -> Bool {
-        return false
+        return HIAHMinimuxer.isAvailable()
     }
     
-    /// Get information about why minimuxer is disabled
-    @objc public class func disabledReason() -> String {
-        return "Minimuxer is disabled because it requires libimobiledevice to be built for iOS."
+    /// Get information about minimuxer status
+    @objc public class func statusInfo() -> String {
+        return HIAHMinimuxer.disabledReason()
     }
 }

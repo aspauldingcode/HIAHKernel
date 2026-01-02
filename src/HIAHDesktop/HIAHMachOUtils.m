@@ -265,4 +265,129 @@
     HIAHLogDebug(HIAHLogFilesystem, "No LC_CODE_SIGNATURE found in binary");
 }
 
++ (BOOL)patchBinaryForJITLessMode:(NSString *)path {
+    // Read binary into memory
+    NSError *readError = nil;
+    NSMutableData *data = [[NSMutableData alloc] initWithContentsOfFile:path 
+                                                                options:NSDataReadingMappedIfSafe 
+                                                                  error:&readError];
+    
+    if (!data || data.length < sizeof(struct mach_header_64)) {
+        HIAHLogError(HIAHLogFilesystem, "Failed to read binary for JIT-less patching: %s", 
+                    readError ? [[readError description] UTF8String] : "(null)");
+        return NO;
+    }
+    
+    uint8_t *bytes = (uint8_t *)data.mutableBytes;
+    uint32_t magic = *(uint32_t *)bytes;
+    
+    // Handle fat binaries
+    if (magic == FAT_MAGIC || magic == FAT_CIGAM) {
+        struct fat_header *fatHeader = (struct fat_header *)bytes;
+        uint32_t archCount = OSSwapBigToHostInt32(fatHeader->nfat_arch);
+        struct fat_arch *archs = (struct fat_arch *)(bytes + sizeof(struct fat_header));
+        
+        BOOL anySlicePatched = NO;
+        for (uint32_t i = 0; i < archCount; i++) {
+            uint32_t sliceOffset = OSSwapBigToHostInt32(archs[i].offset);
+            if (sliceOffset < data.length) {
+                if ([self patchBinaryForJITLessModeInSlice:(bytes + sliceOffset) maxLength:(data.length - sliceOffset)]) {
+                    anySlicePatched = YES;
+                }
+            }
+        }
+        
+        if (anySlicePatched) {
+            // Write patched binary back
+            NSError *writeError = nil;
+            if (![data writeToFile:path options:NSDataWritingAtomic error:&writeError]) {
+                HIAHLogError(HIAHLogFilesystem, "Failed to write patched binary: %s",
+                            writeError ? [[writeError description] UTF8String] : "(null)");
+                return NO;
+            }
+            HIAHLogInfo(HIAHLogFilesystem, "Patched binary for JIT-less mode (fat binary)");
+            return YES;
+        }
+        return NO;
+    } else if (magic == MH_MAGIC_64 || magic == MH_CIGAM_64) {
+        // Thin 64-bit binary
+        if ([self patchBinaryForJITLessModeInSlice:bytes maxLength:data.length]) {
+            // Write patched binary back
+            NSError *writeError = nil;
+            if (![data writeToFile:path options:NSDataWritingAtomic error:&writeError]) {
+                HIAHLogError(HIAHLogFilesystem, "Failed to write patched binary: %s",
+                            writeError ? [[writeError description] UTF8String] : "(null)");
+                return NO;
+            }
+            HIAHLogInfo(HIAHLogFilesystem, "Patched binary for JIT-less mode (64-bit)");
+            return YES;
+        }
+        return NO;
+    } else {
+        HIAHLogError(HIAHLogFilesystem, "Unknown binary format for JIT-less patching");
+        return NO;
+    }
+}
+
++ (BOOL)patchBinaryForJITLessModeInSlice:(uint8_t *)bytes maxLength:(NSUInteger)maxLength {
+    struct mach_header_64 *header = (struct mach_header_64 *)bytes;
+    
+    if (header->magic != MH_MAGIC_64 && header->magic != MH_CIGAM_64) {
+        return NO;
+    }
+    
+    BOOL needsByteSwap = (header->magic == MH_CIGAM_64);
+    
+    // Step 1: Change MH_EXECUTE to MH_DYLIB (or MH_BUNDLE if we can't add LC_ID_DYLIB)
+    // LiveContainer uses MH_DYLIB, but we'll use MH_BUNDLE for simplicity (doesn't require LC_ID_DYLIB)
+    if (header->filetype == MH_EXECUTE) {
+        header->filetype = MH_BUNDLE;
+        HIAHLogDebug(HIAHLogFilesystem, "Changed filetype from MH_EXECUTE to MH_BUNDLE");
+    }
+    
+    // Step 2: Patch __PAGEZERO segment
+    // LiveContainer changes: vmaddr to 0xFFFFC000, vmsize to 0x4000
+    uint8_t *cmdPtr = bytes + sizeof(struct mach_header_64);
+    BOOL pagezeroPatched = NO;
+    
+    for (uint32_t i = 0; i < header->ncmds; i++) {
+        if ((cmdPtr - bytes) + sizeof(struct load_command) > maxLength) {
+            break;
+        }
+        
+        struct load_command *cmd = (struct load_command *)cmdPtr;
+        uint32_t cmdType = needsByteSwap ? OSSwapInt32(cmd->cmd) : cmd->cmd;
+        
+        if (cmdType == LC_SEGMENT_64) {
+            struct segment_command_64 *segCmd = (struct segment_command_64 *)cmdPtr;
+            
+            // Check if this is __PAGEZERO segment
+            char segname[17] = {0};
+            strncpy(segname, segCmd->segname, 16);
+            if (strcmp(segname, "__PAGEZERO") == 0) {
+                // Patch __PAGEZERO: vmaddr = 0xFFFFC000, vmsize = 0x4000
+                uint64_t oldVmaddr = needsByteSwap ? OSSwapInt64(segCmd->vmaddr) : segCmd->vmaddr;
+                uint64_t oldVmsize = needsByteSwap ? OSSwapInt64(segCmd->vmsize) : segCmd->vmsize;
+                
+                segCmd->vmaddr = needsByteSwap ? OSSwapInt64(0xFFFFC000ULL) : 0xFFFFC000ULL;
+                segCmd->vmsize = needsByteSwap ? OSSwapInt64(0x4000ULL) : 0x4000ULL;
+                
+                HIAHLogInfo(HIAHLogFilesystem, "Patched __PAGEZERO: vmaddr 0x%llx->0xFFFFC000, vmsize 0x%llx->0x4000", 
+                           (unsigned long long)oldVmaddr, (unsigned long long)oldVmsize);
+                pagezeroPatched = YES;
+                break;
+            }
+        }
+        
+        uint32_t cmdSize = needsByteSwap ? OSSwapInt32(cmd->cmdsize) : cmd->cmdsize;
+        cmdPtr += cmdSize;
+    }
+    
+    if (!pagezeroPatched) {
+        HIAHLogDebug(HIAHLogFilesystem, "No __PAGEZERO segment found to patch");
+    }
+    
+    return YES; // Return YES if we patched filetype (pagezero is optional)
+}
+
 @end

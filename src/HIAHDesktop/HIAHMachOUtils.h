@@ -56,6 +56,20 @@ NS_ASSUME_NONNULL_BEGIN
  */
 + (BOOL)removeCodeSignature:(NSString *)path;
 
+/**
+ * Patches a Mach-O executable for JIT-less mode (like LiveContainer).
+ * 
+ * This performs the following patches:
+ * 1. Changes MH_EXECUTE to MH_DYLIB (or MH_BUNDLE if MH_DYLIB not supported)
+ * 2. Patches __PAGEZERO segment: vmaddr to 0xFFFFC000, vmsize to 0x4000
+ * 
+ * This allows the binary to be dlopen'd even without JIT enabled.
+ *
+ * @param path Path to the binary to patch
+ * @return YES if patch was successful, NO otherwise
+ */
++ (BOOL)patchBinaryForJITLessMode:(NSString *)path;
+
 @end
 
 NS_ASSUME_NONNULL_END

@@ -115,7 +115,8 @@ extern NSString * const HIAHVPNPreviousStateKey;
 
 #pragma mark - Config
 
-/// Generate WireGuard configuration string
+/// Generate configuration (not needed for LocalDevVPN - kept for API compatibility)
+/// Returns empty string since LocalDevVPN doesn't require configuration files
 - (NSString *)generateConfig;
 
 /// Save config to Documents folder, returns path or nil
@@ -126,6 +127,12 @@ extern NSString * const HIAHVPNPreviousStateKey;
 
 /// Config file URL in Documents
 - (NSURL *)configFileURL;
+
+#pragma mark - Detection
+
+/// Detects if HIAH VPN is actually connected by checking em_proxy and VPN interface
+/// This is more reliable than just checking state, as it verifies actual system state
+- (BOOL)detectHIAHVPNConnected;
 
 #pragma mark - Debug
 

@@ -332,11 +332,30 @@ static NSString *const kProcessCellIdentifier = @"ProcessCell";
                                  selector:@selector(updateStatusIndicators)
                                  userInfo:nil
                                   repeats:YES];
+  
+  // Also observe VPN state changes for immediate updates
+  [[NSNotificationCenter defaultCenter] addObserver:self
+                                           selector:@selector(vpnStateDidChange:)
+                                               name:HIAHVPNStateDidChangeNotification
+                                             object:nil];
+}
+
+- (void)vpnStateDidChange:(NSNotification *)notification {
+  // VPN state changed - update UI immediately
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self updateStatusIndicators];
+  });
+}
+
+- (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (void)updateStatusIndicators {
-  // Use the state machine for VPN status - single source of truth
+  // Check ACTUAL VPN connection status (not just state machine state)
+  // This ensures we show the real current status, not a stale cached state
   HIAHVPNStateMachine *vpnSM = [HIAHVPNStateMachine shared];
+  BOOL vpnActuallyConnected = [vpnSM detectHIAHVPNConnected];
   HIAHVPNState vpnState = vpnSM.state;
   
   // Check actual JIT status (CS_DEBUGGED flag)
@@ -350,46 +369,54 @@ static NSString *const kProcessCellIdentifier = @"ProcessCell";
     jitActive = (flags & CS_DEBUGGED) != 0;
   }
 
-  // Update VPN status based on state machine
+  // Update VPN status based on ACTUAL connection status
   UIColor *greenColor = [UIColor colorWithRed:0.3 green:0.9 blue:0.3 alpha:1.0];
   UIColor *orangeColor = [UIColor orangeColor];
   UIColor *grayColor = [UIColor grayColor];
   UIColor *cyanColor = [UIColor colorWithRed:0.4 green:0.8 blue:1.0 alpha:1.0];
   
-  switch (vpnState) {
-    case HIAHVPNStateConnected:
-      self.vpnStatusLabel.text = @"VPN: ON";
-      self.vpnStatusLabel.textColor = greenColor;
-      break;
-      
-    case HIAHVPNStateProxyReady:
-      self.vpnStatusLabel.text = @"VPN: WAITING";
-      self.vpnStatusLabel.textColor = orangeColor;
-      break;
-      
-    case HIAHVPNStateStartingProxy:
-      self.vpnStatusLabel.text = @"VPN: STARTING";
-      self.vpnStatusLabel.textColor = orangeColor;
-      break;
-      
-    case HIAHVPNStateError:
-      self.vpnStatusLabel.text = @"VPN: ERROR";
-      self.vpnStatusLabel.textColor = [UIColor redColor];
-      break;
-      
-    case HIAHVPNStateIdle:
-    default:
-      self.vpnStatusLabel.text = @"VPN: OFF";
-      self.vpnStatusLabel.textColor = grayColor;
-      break;
+  if (vpnActuallyConnected) {
+    // VPN is actually connected (em_proxy running + utun interface active)
+    self.vpnStatusLabel.text = @"VPN: ON";
+    self.vpnStatusLabel.textColor = greenColor;
+  } else {
+    // VPN is not connected - show state machine state for context
+    switch (vpnState) {
+      case HIAHVPNStateProxyReady:
+        self.vpnStatusLabel.text = @"VPN: WAITING";
+        self.vpnStatusLabel.textColor = orangeColor;
+        break;
+        
+      case HIAHVPNStateStartingProxy:
+        self.vpnStatusLabel.text = @"VPN: STARTING";
+        self.vpnStatusLabel.textColor = orangeColor;
+        break;
+        
+      case HIAHVPNStateError:
+        self.vpnStatusLabel.text = @"VPN: ERROR";
+        self.vpnStatusLabel.textColor = [UIColor redColor];
+        break;
+        
+      case HIAHVPNStateConnected:
+        // State machine says connected but actual check says not - show as waiting
+        self.vpnStatusLabel.text = @"VPN: WAITING";
+        self.vpnStatusLabel.textColor = orangeColor;
+        break;
+        
+      case HIAHVPNStateIdle:
+      default:
+        self.vpnStatusLabel.text = @"VPN: OFF";
+        self.vpnStatusLabel.textColor = grayColor;
+        break;
+    }
   }
   
   // Update JIT status
   if (jitActive) {
     self.jitStatusLabel.text = @"JIT: ON";
     self.jitStatusLabel.textColor = cyanColor;
-  } else if (vpnState == HIAHVPNStateConnected) {
-    // VPN connected but JIT not yet enabled
+  } else if (vpnActuallyConnected) {
+    // VPN actually connected but JIT not yet enabled
     self.jitStatusLabel.text = @"JIT: PENDING";
     self.jitStatusLabel.textColor = orangeColor;
   } else {

@@ -81,14 +81,26 @@ let
       echo "Compiling HIAHKernel.m..."
       $CC -c src/HIAHKernel/Core/HIAHKernel.m -o HIAHKernel.o $OBJCFLAGS -O2
       
+      # Build HIAHDyldBypass
+      echo "Compiling HIAHDyldBypass.m..."
+      $CC -c src/HIAHKernel/Core/Hooks/HIAHDyldBypass.m -o HIAHDyldBypass.o $OBJCFLAGS -O2
+      
+      # Build HIAHBypassStatus
+      echo "Compiling HIAHBypassStatus.m..."
+      $CC -c src/HIAHKernel/Core/Hooks/HIAHBypassStatus.m -o HIAHBypassStatus.o $OBJCFLAGS -O2
+      
+      # Build HIAHMachOUtils
+      echo "Compiling HIAHMachOUtils.m..."
+      $CC -c src/HIAHKernel/Core/Utils/HIAHMachOUtils.m -o HIAHMachOUtils.o $OBJCFLAGS -O2
+      
       # Create static library
       echo "Creating static library libHIAHKernel.a..."
-      ar rcs libHIAHKernel.a HIAHLogging.o HIAHHook.o HIAHGuestHooks.o HIAHProcess.o HIAHKernel.o
+      ar rcs libHIAHKernel.a HIAHLogging.o HIAHHook.o HIAHGuestHooks.o HIAHProcess.o HIAHKernel.o HIAHDyldBypass.o HIAHBypassStatus.o HIAHMachOUtils.o
       
       # Create dynamic library
       echo "Creating dynamic library libHIAHKernel.dylib..."
       $CC -dynamiclib -o libHIAHKernel.dylib \
-        HIAHLogging.o HIAHHook.o HIAHGuestHooks.o HIAHProcess.o HIAHKernel.o \
+        HIAHLogging.o HIAHHook.o HIAHGuestHooks.o HIAHProcess.o HIAHKernel.o HIAHDyldBypass.o HIAHBypassStatus.o HIAHMachOUtils.o \
         $LDFLAGS \
         -install_name @rpath/libHIAHKernel.dylib
       
@@ -111,6 +123,12 @@ let
       cp src/HIAHKernel/Public/HIAHProcess.h $out/include/HIAHKernel/
       cp src/HIAHKernel/Core/Hooks/HIAHHook.h $out/include/HIAHKernel/
       cp src/HIAHKernel/Core/Hooks/HIAHGuestHooks.h $out/include/HIAHKernel/
+      cp src/HIAHKernel/Core/Hooks/HIAHDyldBypass.h $out/include/HIAHKernel/
+      cp src/HIAHKernel/Core/Hooks/HIAHBypassStatus.h $out/include/HIAHKernel/
+      cp src/HIAHKernel/Core/Utils/HIAHMachOUtils.h $out/include/HIAHKernel/
+      
+      # Ensure logging header is available
+      cp src/HIAHKernel/Public/HIAHLogging.h $out/include/HIAHKernel/
       
       # Install extension source (for bundling)
       cp -r src/extension/* $out/share/HIAHKernel/extension/

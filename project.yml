@@ -64,7 +64,7 @@ targets:
       - path: src/HIAHKernel/Public
         headerVisibility: public
       - path: src/HIAHKernel/Core
-        headerVisibility: project
+        headerVisibility: public
     settings:
       PRODUCT_NAME: HIAHKernel
       PRODUCT_BUNDLE_IDENTIFIER: com.aspauldingcode.HIAHKernel

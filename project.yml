@@ -92,16 +92,10 @@ targets:
       properties:
         MinimumOSVersion: "16.0"
         NSExtension:
-          NSExtensionPointIdentifier: com.apple.services
+          NSExtensionPointIdentifier: com.apple.process-runner
           NSExtensionPrincipalClass: HIAHExtensionHandler
           NSExtensionAttributes:
-            NSExtensionActivationRule:
-              NSExtensionActivationSupportsFileWithMaxCount: 1
-              NSExtensionActivationSupportsWebURLWithMaxCount: 0
-              NSExtensionActivationSupportsWebPageWithMaxCount: 0
-              NSExtensionActivationSupportsText: false
-              NSExtensionActivationSupportsImageWithMaxCount: 0
-              NSExtensionActivationSupportsMovieWithMaxCount: 0
+            AllowBackgroundExecution: true
     
     entitlements:
       path: src/extension/Entitlements.plist

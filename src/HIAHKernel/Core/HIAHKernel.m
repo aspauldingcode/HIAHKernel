@@ -30,7 +30,7 @@ static void extensionStartedCallback(CFNotificationCenterRef center,
     // one
     NSFileManager *fm = [NSFileManager defaultManager];
     NSURL *groupURL = [fm containerURLForSecurityApplicationGroupIdentifier:
-                              @"group.com.aspauldingcode.HIAHDesktop"];
+                              kernel.appGroupIdentifier];
     if (groupURL) {
       // Read shared PID file (may contain the latest extension PID)
       NSString *pidFile =

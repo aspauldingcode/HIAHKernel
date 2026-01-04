@@ -612,6 +612,10 @@ NSErrorDomain const HIAHKernelErrorDomain = @"HIAHKernelErrorDomain";
             [[path lastPathComponent] stringByAppendingString:@".patched"]];
 
     NSError *copyError = nil;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:tempPath]) {
+      [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
+    }
+
     if (![[NSFileManager defaultManager] copyItemAtPath:path
                                                  toPath:tempPath
                                                   error:&copyError]) {

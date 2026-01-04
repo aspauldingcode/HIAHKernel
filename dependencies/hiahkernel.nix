@@ -564,7 +564,9 @@ LAUNCHER
         -target arm64-apple-ios16.0-simulator \
         -import-objc-header src/HIAHDesktop/HIAHDesktop-Bridging-Header.h \
         -emit-objc-header-path src/HIAHDesktop/HIAHDesktop-Swift.h \
-        -Isrc/HIAHDesktop -Isrc/HIAHWindowServer -Isrc/HIAHKernel/Public
+        -Isrc/HIAHDesktop -Isrc/HIAHWindowServer -Isrc/HIAHKernel/Public \
+        -Idependencies/swift-packages/Roxas/Sources/Roxas/include \
+        -Idependencies/swift-packages/AltSign/AltSign/include
       
       echo "Compiling HIAHDesktopApp.m..."
       $CC -c src/HIAHDesktop/HIAHDesktopApp.m -o HIAHDesktopApp.o $HIAHFLAGS -Isrc/HIAHWindowServer -Isrc/HIAHDesktop

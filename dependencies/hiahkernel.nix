@@ -500,7 +500,7 @@ LAUNCHER
       
       echo "Building HIAH Desktop for iOS Simulator..."
       
-      HIAHFLAGS="-arch $ARCH -isysroot $SDKROOT -mios-simulator-version-min=15.0 -fobjc-arc -I${iosSimulator}/include -Isrc -Isrc/HIAHTop -Isrc/HIAHDesktop"
+      HIAHFLAGS="-arch $ARCH -isysroot $SDKROOT -mios-simulator-version-min=15.0 -fobjc-arc -I${iosSimulator}/include -Isrc -Isrc/HIAHTop -Isrc/HIAHDesktop -Isrc/HIAHKernel/Public -Isrc/HIAHKernel/Core/Utils"
       
       # Compile HIAHTop components (reuse from iosTopApp build)
       echo "Compiling HIAHLogging.m..."
@@ -661,7 +661,7 @@ LAUNCHER
       # Build ProcessRunner extension (.appex)
       echo "Building HIAHProcessRunner extension..."
       
-      EXTFLAGS="-arch $ARCH -isysroot $SDKROOT -mios-simulator-version-min=15.0 -fobjc-arc -I${iosSimulator}/include -Isrc -Isrc/hooks -fapplication-extension"
+      EXTFLAGS="-arch $ARCH -isysroot $SDKROOT -mios-simulator-version-min=15.0 -fobjc-arc -I${iosSimulator}/include -Isrc -Isrc/hooks -fapplication-extension -Isrc/HIAHKernel/Public -Isrc/HIAHKernel/Core/Utils"
       
       # Compile HIAHHook
       echo "Compiling HIAHHook.c for extension..."

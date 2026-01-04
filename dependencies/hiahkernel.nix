@@ -501,6 +501,7 @@ LAUNCHER
       
       echo "Debug: Checking dependencies..."
       ls -R dependencies/swift-packages || echo "dependencies/swift-packages not found"
+      exit 1
       
       echo "Building HIAH Desktop for iOS Simulator..."
       

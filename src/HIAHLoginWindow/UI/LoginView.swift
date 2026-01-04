@@ -217,7 +217,7 @@ struct InfoRow: View {
     }
 }
 
-#Preview {
-    LoginView()
-}
+// #Preview {
+//     LoginView()
+// }
 

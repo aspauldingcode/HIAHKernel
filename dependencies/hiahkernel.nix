@@ -562,6 +562,16 @@ LAUNCHER
         src/HIAHLoginWindow/UI/HIAHLoginViewController.swift \
         src/HIAHLoginWindow/UI/LoginView.swift \
         src/HIAHLoginWindow/UI/LoginWindowApp.swift \
+        src/HIAHLoginWindow/Auth/AuthenticationManager.swift \
+        src/HIAHLoginWindow/Auth/AltSignExtensions.swift \
+        src/HIAHLoginWindow/Auth/HIAHAccountManager.swift \
+        src/HIAHLoginWindow/Signing/HIAHCertificateManager.swift \
+        src/HIAHLoginWindow/Signing/HIAHAppSigner.swift \
+        src/HIAHLoginWindow/Signing/SigningService.swift \
+        src/HIAHLoginWindow/Refresh/RefreshService.swift \
+        src/HIAHLoginWindow/JIT/HIAHMinimuxer.swift \
+        src/HIAHLoginWindow/JIT/HIAHMinimuxerJIT.swift \
+        src/HIAHLoginWindow/JIT/HIAHJITEnabler.swift \
         -o HIAHSwiftBridge.o \
         -whole-module-optimization \
         -target arm64-apple-ios16.0-simulator \

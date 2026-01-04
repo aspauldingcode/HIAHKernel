@@ -556,7 +556,7 @@ LAUNCHER
         -o HIAHSwiftBridge.o \
         -target arm64-apple-ios15.0-simulator \
         -import-objc-header src/HIAHDesktop/HIAHDesktop-Bridging-Header.h \
-        -emit-objc-header-path HIAHDesktop-Swift.h \
+        -emit-objc-header-path src/HIAHDesktop/HIAHDesktop-Swift.h \
         -Isrc/HIAHDesktop -Isrc/HIAHWindowServer -Isrc/HIAHKernel/Public
       
       echo "Compiling EMProxyBridge.m..."

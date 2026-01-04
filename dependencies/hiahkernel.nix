@@ -498,6 +498,10 @@ LAUNCHER
     buildPhase = ''
       runHook preBuild
       
+      
+      echo "Debug: Checking dependencies..."
+      ls -R dependencies/swift-packages || echo "dependencies/swift-packages not found"
+      
       echo "Building HIAH Desktop for iOS Simulator..."
       
       HIAHFLAGS="-arch $ARCH -isysroot $SDKROOT -mios-simulator-version-min=16.0 -fobjc-arc -I${iosSimulator}/include -Isrc -Isrc/HIAHTop -Isrc/HIAHDesktop -Isrc/HIAHKernel/Public -Isrc/HIAHKernel/Core/Utils -Isrc/HIAHLoginWindow/UI -Isrc/HIAHLoginWindow/VPN -Isrc/HIAHLoginWindow/JIT -Isrc/HIAHLoginWindow/Refresh -Idependencies/swift-packages/Roxas/Sources/Roxas/include -Idependencies/swift-packages/AltSign/AltSign/include"

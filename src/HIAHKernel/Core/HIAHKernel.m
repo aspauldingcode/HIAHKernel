@@ -644,6 +644,9 @@ NSErrorDomain const HIAHKernelErrorDomain = @"HIAHKernelErrorDomain";
       return;
     }
 
+    // Remove code signature (important for dlopen)
+    [HIAHMachOUtils removeCodeSignature:tempPath];
+
     executablePath = tempPath;
     NSLog(@"[HIAHKernel DEBUG] Binary patched successfully: %@", tempPath);
   } else {

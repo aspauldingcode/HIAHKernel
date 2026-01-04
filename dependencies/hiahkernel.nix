@@ -504,10 +504,10 @@ LAUNCHER
       
       # Compile HIAHTop components (reuse from iosTopApp build)
       echo "Compiling HIAHLogging.m..."
-      $CC -c src/HIAHDesktop/HIAHLogging.m -o HIAHLogging.o $HIAHFLAGS
+      $CC -c src/HIAHKernel/Core/Logging/HIAHLogging.m -o HIAHLogging.o $HIAHFLAGS
       
       echo "Compiling HIAHMachOUtils.m..."
-      $CC -c src/HIAHDesktop/HIAHMachOUtils.m -o HIAHMachOUtils.o $HIAHFLAGS
+      $CC -c src/HIAHKernel/Core/Utils/HIAHMachOUtils.m -o HIAHMachOUtils.o $HIAHFLAGS
       
       echo "Compiling HIAHProcessStats.m..."
       $CC -c src/HIAHTop/HIAHProcessStats.m -o HIAHProcessStats.o $HIAHFLAGS
@@ -669,10 +669,10 @@ LAUNCHER
       
       # Compile extension dependencies
       echo "Compiling HIAHLogging.m for extension..."
-      $CC -c src/HIAHDesktop/HIAHLogging.m -o ext_logging.o $EXTFLAGS
+      $CC -c src/HIAHKernel/Core/Logging/HIAHLogging.m -o ext_logging.o $EXTFLAGS
       
       echo "Compiling HIAHMachOUtils.m for extension..."
-      $CC -c src/HIAHDesktop/HIAHMachOUtils.m -o ext_machoutils.o $EXTFLAGS
+      $CC -c src/HIAHKernel/Core/Utils/HIAHMachOUtils.m -o ext_machoutils.o $EXTFLAGS
       
       echo "Compiling HIAHDyldBypass.m for extension..."
       $CC -c src/hooks/HIAHDyldBypass.m -o ext_dyldbypass.o $EXTFLAGS

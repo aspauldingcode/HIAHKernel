@@ -409,9 +409,8 @@
         uint64_t oldVmsize =
             needsByteSwap ? OSSwapInt64(segCmd->vmsize) : segCmd->vmsize;
 
-        segCmd->vmaddr =
-            needsByteSwap ? OSSwapInt64(0xFFFFC000ULL) : 0xFFFFC000ULL;
-        segCmd->vmsize = needsByteSwap ? OSSwapInt64(0x4000ULL) : 0x4000ULL;
+        segCmd->vmaddr = needsByteSwap ? OSSwapInt64(0x0ULL) : 0x0ULL;
+        segCmd->vmsize = 0; // Set to 0 to disable mapping
 
         HIAHLogInfo(HIAHLogFilesystem,
                     "Patched __PAGEZERO: vmaddr 0x%llx->0xFFFFC000, vmsize "

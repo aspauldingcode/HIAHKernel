@@ -595,15 +595,10 @@ NSErrorDomain const HIAHKernelErrorDomain = @"HIAHKernelErrorDomain";
 
   // 2. Patch binary for dlopen if needed
   NSString *executablePath = path;
-  NSLog(@"[HIAHKernel DEBUG] Starting spawn logic for: %@", path);
-  printf("[HIAHKernel PRINTF] Starting spawn logic for: %s\n", [path UTF8String]); fflush(stdout);
-
+  
   // Check if binary needs patching (MH_EXECUTE → MH_BUNDLE)
-  BOOL isExecute = [HIAHMachOUtils isMHExecute:path];
-  NSLog(@"[HIAHKernel DEBUG] isMHExecute check result: %d", isExecute);
-
-  if (isExecute) {
-    NSLog(@"[HIAHKernel DEBUG] Binary is MH_EXECUTE, patching for dlopen...");
+  if ([HIAHMachOUtils isMHExecute:path]) {
+    HIAHLogInfo(HIAHLogKernel, "Binary is MH_EXECUTE, patching for dlopen...");
     
     // Create a temporary copy for patching
     NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
@@ -613,7 +608,6 @@ NSErrorDomain const HIAHKernelErrorDomain = @"HIAHKernelErrorDomain";
     if (![[NSFileManager defaultManager] copyItemAtPath:path
                                                   toPath:tempPath
                                                    error:&copyError]) {
-      NSLog(@"[HIAHKernel DEBUG] Failed to copy binary: %@", copyError);
       HIAHLogError(HIAHLogKernel, "Failed to copy binary for patching: %s",
                    [[copyError description] UTF8String]);
       if (completion) {
@@ -624,7 +618,6 @@ NSErrorDomain const HIAHKernelErrorDomain = @"HIAHKernelErrorDomain";
     
     // Patch the binary using JIT-less mode (LiveContainer approach)
     if (![HIAHMachOUtils patchBinaryForJITLessMode:tempPath]) {
-      NSLog(@"[HIAHKernel DEBUG] Failed to patch binary");
       HIAHLogError(HIAHLogKernel, "Failed to patch binary for dlopen");
       if (completion) {
         NSError *err = [NSError errorWithDomain:HIAHKernelErrorDomain
@@ -636,21 +629,16 @@ NSErrorDomain const HIAHKernelErrorDomain = @"HIAHKernelErrorDomain";
     }
     
     executablePath = tempPath;
-    NSLog(@"[HIAHKernel DEBUG] Binary patched successfully: %@", tempPath);
-  } else {
-    NSLog(@"[HIAHKernel DEBUG] Binary does NOT need patching (already dylib/bundle)");
+    HIAHLogInfo(HIAHLogKernel, "Binary patched successfully: %s", [tempPath UTF8String]);
   }
   
   // 3. Load the binary via dlopen
-  NSLog(@"[HIAHKernel DEBUG] About to dlopen: %@", executablePath);
-  printf("[HIAHKernel PRINTF] Calling dlopen on: %s\n", [executablePath UTF8String]); fflush(stdout);
+  HIAHLogInfo(HIAHLogKernel, "Loading binary via dlopen: %s", [executablePath UTF8String]);
   
   void *handle = dlopen([executablePath UTF8String], RTLD_NOW | RTLD_GLOBAL);
-  
   if (!handle) {
     const char *dlopen_error = dlerror();
-    NSLog(@"[HIAHKernel DEBUG] dlopen FAILED: %s", dlopen_error);
-    printf("[HIAHKernel PRINTF] dlopen FAILED: %s\n", dlopen_error); fflush(stdout);
+    HIAHLogError(HIAHLogKernel, "dlopen failed: %s", dlopen_error ?: "(null)");
     
     if (completion) {
       NSError *err = [NSError errorWithDomain:HIAHKernelErrorDomain
@@ -662,9 +650,6 @@ NSErrorDomain const HIAHKernelErrorDomain = @"HIAHKernelErrorDomain";
     }
     return;
   }
-  
-  NSLog(@"[HIAHKernel DEBUG] dlopen SUCCESS, handle: %p", handle);
-  printf("[HIAHKernel PRINTF] dlopen SUCCESS\n"); fflush(stdout);
   
   HIAHLogInfo(HIAHLogKernel, "Binary loaded successfully via dlopen");
   
@@ -684,7 +669,7 @@ NSErrorDomain const HIAHKernelErrorDomain = @"HIAHKernelErrorDomain";
   
   [self registerProcess:vproc];
   
-  NSLog(@"[HIAHKernel DEBUG] Registered virtual process PID: %d", vproc.pid);
+  HIAHLogInfo(HIAHLogKernel, "Spawned guest process via dlopen (Virtual PID: %d)", vproc.pid);
   
   // 5. Find and execute entry point
   // For command-line tools like ssh/waypipe, we need to find main()
@@ -697,8 +682,7 @@ NSErrorDomain const HIAHKernelErrorDomain = @"HIAHKernelErrorDomain";
   }
   
   if (main_func) {
-    NSLog(@"[HIAHKernel DEBUG] Found main() entry point, spawning thread...");
-    printf("[HIAHKernel PRINTF] Executing main()\n"); fflush(stdout);
+    HIAHLogInfo(HIAHLogKernel, "Found entry point, executing in background thread...");
     
     // Execute main() in a background thread
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -729,13 +713,9 @@ NSErrorDomain const HIAHKernelErrorDomain = @"HIAHKernelErrorDomain";
       envp[envCount] = NULL;
       
       // Call main()
-      NSLog(@"[HIAHKernel DEBUG] Calling main() with %d args", argc);
-      printf("[HIAHKernel PRINTF] Calling main() now...\n"); fflush(stdout);
-      
+      HIAHLogInfo(HIAHLogKernel, "Calling main() with %d arguments", argc);
       int exitCode = main_func(argc, argv, envp);
-      
-      NSLog(@"[HIAHKernel DEBUG] main() returned: %d", exitCode);
-      printf("[HIAHKernel PRINTF] main() returned: %d\n", exitCode); fflush(stdout);
+      HIAHLogInfo(HIAHLogKernel, "main() returned with exit code: %d", exitCode);
       
       // Clean up
       for (int i = 0; i < argc; i++) {
@@ -756,7 +736,6 @@ NSErrorDomain const HIAHKernelErrorDomain = @"HIAHKernelErrorDomain";
       completion(vproc.pid, nil);
     }
   } else {
-    NSLog(@"[HIAHKernel DEBUG] No main() entry point found!");
     HIAHLogWarning(HIAHLogKernel, "No main() entry point found, binary loaded but not executed");
     
     // Still return success - the binary is loaded

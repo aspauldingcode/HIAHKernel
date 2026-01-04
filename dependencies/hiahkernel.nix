@@ -51,7 +51,7 @@ let
       fi
       
       export ARCH="$SIMULATOR_ARCH"
-      export CFLAGS="-arch $ARCH -isysroot $SDKROOT -mios-simulator-version-min=15.0 -fPIC -fobjc-arc -I$PWD/src -I$PWD/src/HIAHKernel/Public"
+      export CFLAGS="-arch $ARCH -isysroot $SDKROOT -mios-simulator-version-min=15.0 -fPIC -fobjc-arc -Isrc -Isrc/HIAHKernel/Public -Isrc/HIAHKernel/Core/Utils"
       export OBJCFLAGS="$CFLAGS"
       export LDFLAGS="-arch $SIMULATOR_ARCH -isysroot $SDKROOT -mios-simulator-version-min=15.0 -framework Foundation -framework UIKit"
     '';
@@ -62,6 +62,10 @@ let
       echo "Building HIAHKernel for iOS Simulator ($ARCH)..."
       
       # Build HIAHHook
+      echo "--- DEBUG FILE STRUCTURE ---"
+      find src -maxdepth 5 -name "HIAHMachOUtils.h"
+      echo "---------------------------"
+
       echo "Compiling HIAHHook.c..."
       $CC -c src/HIAHKernel/Core/Hooks/HIAHHook.c -o HIAHHook.o $CFLAGS -O2
       

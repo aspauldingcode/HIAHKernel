@@ -499,8 +499,8 @@ LAUNCHER
       runHook preBuild
       
       
-      echo "Debug: Listing root files..."
-      ls -F
+      echo "Debug: Listing dependencies..."
+      ls -F dependencies
       exit 1
       
       echo "Start Building"

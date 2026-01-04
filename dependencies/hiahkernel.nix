@@ -548,8 +548,13 @@ LAUNCHER
       echo "Compiling HIAHCarPlayController.m..."
       $CC -c src/HIAHDesktop/HIAHCarPlayController.m -o HIAHCarPlayController.o $HIAHFLAGS -Isrc/HIAHWindowServer -Isrc/HIAHDesktop
       
-      echo "Compiling HIAHSwiftBridge.swift..."
+      echo "Compiling HIAHSwiftBridge.swift and Sample Apps..."
       /usr/bin/xcrun -sdk iphonesimulator swiftc -c src/HIAHDesktop/HIAHSwiftBridge.swift \
+        src/SampleApps/Weather/WeatherApp.swift \
+        src/SampleApps/Timer/TimerApp.swift \
+        src/SampleApps/Canvas/CanvasApp.swift \
+        src/SampleApps/Calculator/CalculatorApp.swift \
+        src/SampleApps/Notes/NotesApp.swift \
         -o HIAHSwiftBridge.o \
         -target arm64-apple-ios15.0-simulator \
         -import-objc-header src/HIAHDesktop/HIAHDesktop-Bridging-Header.h \

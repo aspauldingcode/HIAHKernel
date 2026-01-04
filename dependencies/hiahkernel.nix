@@ -500,7 +500,7 @@ LAUNCHER
       
       echo "Building HIAH Desktop for iOS Simulator..."
       
-      HIAHFLAGS="-arch $ARCH -isysroot $SDKROOT -mios-simulator-version-min=16.0 -fobjc-arc -I${iosSimulator}/include -Isrc -Isrc/HIAHTop -Isrc/HIAHDesktop -Isrc/HIAHKernel/Public -Isrc/HIAHKernel/Core/Utils -Isrc/HIAHLoginWindow/UI -Isrc/HIAHLoginWindow/VPN -Isrc/HIAHLoginWindow/JIT -Isrc/HIAHLoginWindow/Refresh"
+      HIAHFLAGS="-arch $ARCH -isysroot $SDKROOT -mios-simulator-version-min=16.0 -fobjc-arc -I${iosSimulator}/include -Isrc -Isrc/HIAHTop -Isrc/HIAHDesktop -Isrc/HIAHKernel/Public -Isrc/HIAHKernel/Core/Utils -Isrc/HIAHLoginWindow/UI -Isrc/HIAHLoginWindow/VPN -Isrc/HIAHLoginWindow/JIT -Isrc/HIAHLoginWindow/Refresh -Idependencies/swift-packages/Roxas/Sources/Roxas/include -Idependencies/swift-packages/AltSign/AltSign/include"
       
       # Compile HIAHTop components (reuse from iosTopApp build)
       echo "Compiling HIAHLogging.m..."
@@ -585,6 +585,12 @@ LAUNCHER
       echo "Compiling HIAHCertificateMonitor.m..."
       $CC -c src/HIAHLoginWindow/Refresh/HIAHCertificateMonitor.m -o HIAHCertificateMonitor.o $HIAHFLAGS -Isrc/HIAHLoginWindow/Refresh
       
+      echo "Compiling Roxas..."
+      find dependencies/swift-packages/Roxas -name "*.m" -exec $CC -c {} -o {}.o $HIAHFLAGS -Idependencies/swift-packages/Roxas/Sources/Roxas/include \;
+      
+      echo "Compiling AltSign..."
+      find dependencies/swift-packages/AltSign -name "*.m" -exec $CC -c {} -o {}.o $HIAHFLAGS -Idependencies/swift-packages/AltSign/AltSign/include \;
+
       echo "Compiling HIAHBackgroundRefresher.m..."
       $CC -c src/HIAHLoginWindow/Refresh/HIAHBackgroundRefresher.m -o HIAHBackgroundRefresher.o $HIAHFLAGS -Isrc/HIAHLoginWindow/Refresh
       
@@ -593,7 +599,11 @@ LAUNCHER
       
       # Link everything together
       echo "Linking HIAH Desktop..."
-      $CC EMProxyBridge.o HIAHVPNManager.o MinimuxerBridge.o HIAHJITManager.o HIAHCertificateMonitor.o HIAHBackgroundRefresher.o HIAHLogging.o HIAHMachOUtils.o HIAHProcessStats.o HIAHResourceCollector.o HIAHManagedProcess.o HIAHProcessManager.o HIAHTopViewController.o HIAHWindowServer.o HIAHAppWindowSession.o HIAHFloatingWindow.o HIAHAppLauncher.o HIAHStateMachine.o HIAHeDisplayMode.o HIAHFilesystem.o HIAHCarPlayController.o HIAHDesktopApp.o HIAHSwiftBridge.o \
+      # Find all compiled objects from dependencies
+      ROXAS_OBJS=$(find dependencies/swift-packages/Roxas -name "*.o")
+      ALTSIGN_OBJS=$(find dependencies/swift-packages/AltSign -name "*.o")
+      
+      $CC EMProxyBridge.o HIAHVPNManager.o MinimuxerBridge.o HIAHJITManager.o HIAHCertificateMonitor.o HIAHBackgroundRefresher.o HIAHLogging.o HIAHMachOUtils.o HIAHProcessStats.o HIAHResourceCollector.o HIAHManagedProcess.o HIAHProcessManager.o HIAHTopViewController.o HIAHWindowServer.o HIAHAppWindowSession.o HIAHFloatingWindow.o HIAHAppLauncher.o HIAHStateMachine.o HIAHeDisplayMode.o HIAHFilesystem.o HIAHCarPlayController.o HIAHDesktopApp.o HIAHSwiftBridge.o $ROXAS_OBJS $ALTSIGN_OBJS \
         -o HIAHDesktop \
         -arch $ARCH \
         -isysroot $SDKROOT \

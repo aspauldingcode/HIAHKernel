@@ -548,9 +548,6 @@ LAUNCHER
       echo "Compiling HIAHCarPlayController.m..."
       $CC -c src/HIAHDesktop/HIAHCarPlayController.m -o HIAHCarPlayController.o $HIAHFLAGS -Isrc/HIAHWindowServer -Isrc/HIAHDesktop
       
-      echo "Compiling HIAHDesktopApp.m..."
-      $CC -c src/HIAHDesktop/HIAHDesktopApp.m -o HIAHDesktopApp.o $HIAHFLAGS -Isrc/HIAHWindowServer -Isrc/HIAHDesktop
-      
       echo "Compiling HIAHSwiftBridge.swift..."
       /usr/bin/xcrun -sdk iphonesimulator swiftc -c src/HIAHDesktop/HIAHSwiftBridge.swift \
         -o HIAHSwiftBridge.o \
@@ -558,6 +555,10 @@ LAUNCHER
         -import-objc-header src/HIAHDesktop/HIAHDesktop-Bridging-Header.h \
         -emit-objc-header-path src/HIAHDesktop/HIAHDesktop-Swift.h \
         -Isrc/HIAHDesktop -Isrc/HIAHWindowServer -Isrc/HIAHKernel/Public
+      
+      echo "Compiling HIAHDesktopApp.m..."
+      $CC -c src/HIAHDesktop/HIAHDesktopApp.m -o HIAHDesktopApp.o $HIAHFLAGS -Isrc/HIAHWindowServer -Isrc/HIAHDesktop
+      
       
       echo "Compiling EMProxyBridge.m..."
       $CC -c src/HIAHLoginWindow/VPN/EMProxyBridge.m -o EMProxyBridge.o $HIAHFLAGS -Isrc/HIAHLoginWindow/VPN

@@ -556,6 +556,7 @@ LAUNCHER
         src/SampleApps/Calculator/CalculatorApp.swift \
         src/SampleApps/Notes/NotesApp.swift \
         -o HIAHSwiftBridge.o \
+        -whole-module-optimization \
         -target arm64-apple-ios15.0-simulator \
         -import-objc-header src/HIAHDesktop/HIAHDesktop-Bridging-Header.h \
         -emit-objc-header-path src/HIAHDesktop/HIAHDesktop-Swift.h \

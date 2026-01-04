@@ -105,11 +105,9 @@
           stdenv = pkgs.stdenv;
           buildPackages = pkgs.buildPackages;
         };
-        hiahkernelSrc = pkgs.lib.cleanSourceWith {
-          src = ./.;
-          filter = path: type:
-            let base = builtins.baseNameOf path;
-            in !(base == ".git" || base == "build" || base == "result" || base == ".direnv" || pkgs.lib.hasPrefix "result" base);
+        hiahkernelSrc = builtins.path {
+          path = ./.;
+          name = "hiahkernel-src";
         };
         hiahkernelBuildModule = import ./dependencies/hiahkernel.nix {
           lib = pkgs.lib;

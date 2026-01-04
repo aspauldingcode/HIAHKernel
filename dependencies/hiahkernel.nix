@@ -500,7 +500,7 @@ LAUNCHER
       
       echo "Building HIAH Desktop for iOS Simulator..."
       
-      HIAHFLAGS="-arch $ARCH -isysroot $SDKROOT -mios-simulator-version-min=16.0 -fobjc-arc -I${iosSimulator}/include -Isrc -Isrc/HIAHTop -Isrc/HIAHDesktop -Isrc/HIAHKernel/Public -Isrc/HIAHKernel/Core/Utils"
+      HIAHFLAGS="-arch $ARCH -isysroot $SDKROOT -mios-simulator-version-min=16.0 -fobjc-arc -I${iosSimulator}/include -Isrc -Isrc/HIAHTop -Isrc/HIAHDesktop -Isrc/HIAHKernel/Public -Isrc/HIAHKernel/Core/Utils -Isrc/HIAHLoginWindow/UI -Isrc/HIAHLoginWindow/VPN -Isrc/HIAHLoginWindow/JIT -Isrc/HIAHLoginWindow/Refresh"
       
       # Compile HIAHTop components (reuse from iosTopApp build)
       echo "Compiling HIAHLogging.m..."

@@ -378,9 +378,9 @@
   // LC_ID_DYLIB) LiveContainer uses MH_DYLIB, but we'll use MH_BUNDLE for
   // simplicity (doesn't require LC_ID_DYLIB)
   if (header->filetype == MH_EXECUTE) {
-    header->filetype = MH_BUNDLE;
+    header->filetype = MH_DYLIB;
     HIAHLogDebug(HIAHLogFilesystem,
-                 "Changed filetype from MH_EXECUTE to MH_BUNDLE");
+                 "Changed filetype from MH_EXECUTE to MH_DYLIB");
   }
 
   // Step 2: Patch __PAGEZERO segment

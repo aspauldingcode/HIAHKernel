@@ -555,6 +555,7 @@ LAUNCHER
         src/SampleApps/Canvas/CanvasApp.swift \
         src/SampleApps/Calculator/CalculatorApp.swift \
         src/SampleApps/Notes/NotesApp.swift \
+        src/HIAHTerminal/TerminalApp.swift \
         -o HIAHSwiftBridge.o \
         -whole-module-optimization \
         -target arm64-apple-ios16.0-simulator \
@@ -593,7 +594,7 @@ LAUNCHER
         -o HIAHDesktop \
         -arch $ARCH \
         -isysroot $SDKROOT \
-        -mios-simulator-version-min=15.0 \
+        -mios-simulator-version-min=16.0 \
         -L${iosSimulator}/lib \
         -lHIAHKernel \
         -lz \

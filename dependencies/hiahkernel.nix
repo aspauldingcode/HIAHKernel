@@ -556,6 +556,9 @@ LAUNCHER
         src/SampleApps/Calculator/CalculatorApp.swift \
         src/SampleApps/Notes/NotesApp.swift \
         src/HIAHTerminal/TerminalApp.swift \
+        src/HIAHLoginWindow/UI/HIAHLoginViewController.swift \
+        src/HIAHLoginWindow/UI/LoginView.swift \
+        src/HIAHLoginWindow/UI/LoginWindowApp.swift \
         -o HIAHSwiftBridge.o \
         -whole-module-optimization \
         -target arm64-apple-ios16.0-simulator \
@@ -586,11 +589,11 @@ LAUNCHER
       $CC -c src/HIAHLoginWindow/Refresh/HIAHBackgroundRefresher.m -o HIAHBackgroundRefresher.o $HIAHFLAGS -Isrc/HIAHLoginWindow/Refresh
       
       echo "Compiling HIAHLoginViewController.m..."
-      $CC -c src/HIAHLoginWindow/UI/HIAHLoginViewController.m -o HIAHLoginViewController.o $HIAHFLAGS -Isrc/HIAHLoginWindow/UI
+
       
       # Link everything together
       echo "Linking HIAH Desktop..."
-      $CC EMProxyBridge.o HIAHVPNManager.o MinimuxerBridge.o HIAHJITManager.o HIAHCertificateMonitor.o HIAHBackgroundRefresher.o HIAHLoginViewController.o HIAHLogging.o HIAHMachOUtils.o HIAHProcessStats.o HIAHResourceCollector.o HIAHManagedProcess.o HIAHProcessManager.o HIAHTopViewController.o HIAHWindowServer.o HIAHAppWindowSession.o HIAHFloatingWindow.o HIAHAppLauncher.o HIAHStateMachine.o HIAHeDisplayMode.o HIAHFilesystem.o HIAHCarPlayController.o HIAHDesktopApp.o HIAHSwiftBridge.o \
+      $CC EMProxyBridge.o HIAHVPNManager.o MinimuxerBridge.o HIAHJITManager.o HIAHCertificateMonitor.o HIAHBackgroundRefresher.o HIAHLogging.o HIAHMachOUtils.o HIAHProcessStats.o HIAHResourceCollector.o HIAHManagedProcess.o HIAHProcessManager.o HIAHTopViewController.o HIAHWindowServer.o HIAHAppWindowSession.o HIAHFloatingWindow.o HIAHAppLauncher.o HIAHStateMachine.o HIAHeDisplayMode.o HIAHFilesystem.o HIAHCarPlayController.o HIAHDesktopApp.o HIAHSwiftBridge.o \
         -o HIAHDesktop \
         -arch $ARCH \
         -isysroot $SDKROOT \

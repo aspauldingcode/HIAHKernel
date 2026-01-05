@@ -2,6 +2,8 @@
 
 **iOS Virtual Kernel for multi-process execution on jailed devices.**
 
+# IT IS NOT READY FOR YOU TO USE.
+
 HIAHKernel enables iOS apps to spawn and manage multiple processes within their sandbox, combining SideStore and LiveContainer functionality into a single solution.
 
 ## Quick Start

@@ -1,61 +1,88 @@
 /**
  * HIAHProcess.h
- * HIAHKernel – House in a House Virtual Kernel (for iOS)
+ * Virtual Process Representation
  *
- * Virtual process representation for iOS multi-process emulation.
- *
- * Copyright (c) 2025 Alex Spaulding
- * Licensed under MIT License
+ * Copyright (c) 2025 Alex Spaulding - MIT License
  */
 
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// Process state
+typedef NS_ENUM(NSInteger, HIAHProcessState) {
+    HIAHProcessStateCreated,    ///< Created but not started
+    HIAHProcessStateRunning,    ///< Currently executing
+    HIAHProcessStateStopped,    ///< Stopped (SIGSTOP)
+    HIAHProcessStateZombie,     ///< Exited, waiting for wait()
+    HIAHProcessStateTerminated, ///< Fully terminated
+};
+
 /**
- * Represents a virtual process managed by HIAHKernel.
- *
- * Each HIAHProcess tracks both the virtual PID (used by the kernel)
- * and the physical PID (actual iOS process, typically an NSExtension).
+ * Represents a virtual process in HIAHKernel.
  */
 @interface HIAHProcess : NSObject
 
-/// Virtual PID assigned by HIAHKernel (or physical PID if mapped 1:1)
+// MARK: Identification
+
+/// Virtual PID (assigned by kernel)
 @property (nonatomic, assign) pid_t pid;
 
-/// The actual PID of the extension process running the guest
+/// Physical PID (actual iOS process/thread)
 @property (nonatomic, assign) pid_t physicalPid;
 
-/// Parent PID (for process hierarchy tracking)
+/// Parent PID
 @property (nonatomic, assign) pid_t ppid;
 
-/// Path to the executable being run
+/// Process group ID
+@property (nonatomic, assign) pid_t pgid;
+
+/// Session ID
+@property (nonatomic, assign) pid_t sid;
+
+// MARK: Execution
+
+/// Executable path
 @property (nonatomic, copy) NSString *executablePath;
 
-/// Command-line arguments passed to the process
+/// Arguments (argv)
 @property (nonatomic, copy, nullable) NSArray<NSString *> *arguments;
 
-/// Environment variables for the process
+/// Environment variables
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, NSString *> *environment;
 
-/// Exit code (valid only if isExited is YES)
-@property (nonatomic, assign) int exitCode;
-
-/// Whether the process has exited
-@property (nonatomic, assign) BOOL isExited;
-
-/// NSExtension request identifier (used to track extension lifecycle)
-@property (nonatomic, strong, nullable) NSUUID *requestIdentifier;
-
-/// Timestamp when process was spawned
-@property (nonatomic, strong, readonly) NSDate *startTime;
-
-/// Working directory for the process
+/// Working directory
 @property (nonatomic, copy, nullable) NSString *workingDirectory;
 
-/**
- * Creates a new virtual process with the specified executable.
- */
+// MARK: State
+
+/// Current state
+@property (nonatomic, assign) HIAHProcessState state;
+
+/// Exit code (valid when state >= Zombie)
+@property (nonatomic, assign) int exitCode;
+
+/// Exit signal (if killed by signal)
+@property (nonatomic, assign) int exitSignal;
+
+/// Start time
+@property (nonatomic, strong, readonly) NSDate *startTime;
+
+// MARK: Handle
+
+/// dlopen handle (for dlopen-based execution)
+@property (nonatomic, assign, nullable) void *handle;
+
+/// Thread (for thread-based execution)
+@property (nonatomic, assign) pthread_t thread;  // pthread_t is not a pointer type
+
+// MARK: Legacy Compatibility
+
+/// Whether process has exited (legacy)
+@property (nonatomic, readonly) BOOL isExited;
+
+// MARK: Factory
+
 + (instancetype)processWithPath:(NSString *)path
                       arguments:(nullable NSArray<NSString *> *)arguments
                     environment:(nullable NSDictionary<NSString *, NSString *> *)environment;
@@ -63,4 +90,3 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 NS_ASSUME_NONNULL_END
-

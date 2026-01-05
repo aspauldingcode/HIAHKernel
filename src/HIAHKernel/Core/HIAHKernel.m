@@ -1,809 +1,450 @@
 /**
  * HIAHKernel.m
- * HIAHKernel – House in a House Virtual Kernel (for iOS)
+ * Virtual Kernel Implementation
  *
- * Implementation of the virtual kernel core.
- *
- * Copyright (c) 2025 Alex Spaulding
- * Licensed under MIT License
+ * Copyright (c) 2025 Alex Spaulding - MIT License
  */
 
 #import "HIAHKernel.h"
+#import "HIAHProcess.h"
 #import "HIAHLogging.h"
 #import "HIAHMachOUtils.h"
-#import <CoreFoundation/CoreFoundation.h>
-#import <Foundation/Foundation.h>
 #import <dlfcn.h>
 #import <errno.h>
+#import <pthread.h>
 #import <sys/socket.h>
 #import <sys/un.h>
+#import <sys/wait.h>
 #import <unistd.h>
 
-// Callback for extension started notifications
-static void extensionStartedCallback(CFNotificationCenterRef center,
-                                     void *observer, CFStringRef name,
-                                     const void *object,
-                                     CFDictionaryRef userInfo) {
-  HIAHKernel *kernel = (__bridge HIAHKernel *)observer;
-  if (kernel) {
-    // Read PIDs from App Group storage
-    // CRITICAL: Read both the shared PID file AND all unique PID files
-    // This ensures we enable JIT for ALL extension processes, not just the last
-    // one
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSURL *groupURL = [fm containerURLForSecurityApplicationGroupIdentifier:
-                              kernel.appGroupIdentifier];
-    if (groupURL) {
-      // Read shared PID file (may contain the latest extension PID)
-      NSString *pidFile =
-          [[groupURL.path stringByAppendingPathComponent:@"extension.pid"]
-              stringByStandardizingPath];
-      NSString *pidStr = [NSString stringWithContentsOfFile:pidFile
-                                                   encoding:NSUTF8StringEncoding
-                                                      error:nil];
-      if (pidStr) {
-        pid_t pid = pidStr.intValue;
-        HIAHLogEx(HIAH_LOG_INFO, @"Kernel",
-                  @"Extension started notification received (PID: %d from "
-                  @"shared file) - enabling JIT immediately",
-                  pid);
-        [kernel enableJITForExtensionProcessWithRetries:pid];
-      }
+// MARK: - Notifications & Error Domain
 
-      // CRITICAL: Also scan for all unique PID files (extension.PID.pid)
-      // This catches ALL extension processes, not just the one that wrote to
-      // the shared file
-      NSError *error = nil;
-      NSArray<NSString *> *files = [fm contentsOfDirectoryAtPath:groupURL.path
-                                                           error:&error];
-      if (files) {
-        for (NSString *filename in files) {
-          if ([filename hasPrefix:@"extension."] &&
-              [filename hasSuffix:@".pid"] &&
-              ![filename isEqualToString:@"extension.pid"]) {
-            // Extract PID from filename (extension.PID.pid)
-            NSString *pidPart = [[filename stringByDeletingPathExtension]
-                stringByReplacingOccurrencesOfString:@"extension."
-                                          withString:@""];
-            pid_t pid = pidPart.intValue;
-            if (pid > 0) {
-              HIAHLogEx(
-                  HIAH_LOG_INFO, @"Kernel",
-                  @"Found extension PID file: %@ (PID: %d) - enabling JIT",
-                  filename, pid);
-              [kernel enableJITForExtensionProcessWithRetries:pid];
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-NSNotificationName const HIAHKernelProcessSpawnedNotification =
-    @"HIAHKernelProcessSpawned";
-NSNotificationName const HIAHKernelProcessExitedNotification =
-    @"HIAHKernelProcessExited";
-NSNotificationName const HIAHKernelProcessOutputNotification =
-    @"HIAHKernelProcessOutput";
+NSNotificationName const HIAHKernelProcessSpawnedNotification = @"HIAHKernelProcessSpawned";
+NSNotificationName const HIAHKernelProcessExitedNotification = @"HIAHKernelProcessExited";
+NSNotificationName const HIAHKernelProcessOutputNotification = @"HIAHKernelProcessOutput";
 NSErrorDomain const HIAHKernelErrorDomain = @"HIAHKernelErrorDomain";
 
+// MARK: - Private Interface
+
 @interface HIAHKernel ()
-@property(nonatomic, strong)
-    NSMutableDictionary<NSNumber *, HIAHProcess *> *processTable;
-@property(nonatomic, strong) NSRecursiveLock *lock;
-@property(nonatomic, strong) NSMutableArray *activeExtensions;
-@property(nonatomic, assign) int controlSocket;
-@property(nonatomic, copy, readwrite) NSString *controlSocketPath;
-@property(nonatomic, assign) BOOL isShuttingDown;
-@property(nonatomic, strong)
-    NSString *socketDirectory; // Cached socket directory
-@property(nonatomic, strong)
-    NSXPCListener *xpcListener; // XPC listener for extension communication
-@property(nonatomic, assign) pid_t nextVirtualPid;
+@property (nonatomic, strong) NSMutableDictionary<NSNumber *, HIAHProcess *> *processTable;
+@property (nonatomic, strong) NSRecursiveLock *lock;
+@property (nonatomic, assign) pid_t nextPID;
+@property (nonatomic, assign) int controlSocket;
+@property (nonatomic, copy, readwrite) NSString *controlSocketPath;
+@property (nonatomic, assign) BOOL isShuttingDown;
+@property (nonatomic, strong) dispatch_queue_t ioQueue;
 @end
+
+// MARK: - Implementation
 
 @implementation HIAHKernel
 
 #pragma mark - Singleton
 
 + (instancetype)sharedKernel {
-  static HIAHKernel *shared = nil;
-  static dispatch_once_t onceToken;
-  dispatch_once(&onceToken, ^{
-    shared = [[self alloc] init];
-  });
-  return shared;
+    static HIAHKernel *shared = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        shared = [[self alloc] init];
+    });
+    return shared;
 }
 
-#pragma mark - Initialization
+#pragma mark - Init
 
 - (instancetype)init {
-  self = [super init];
-  if (self) {
-    _processTable = [NSMutableDictionary dictionary];
-    _lock = [[NSRecursiveLock alloc] init];
-    _activeExtensions = [NSMutableArray array];
-    _controlSocket = -1;
-    _isShuttingDown = NO;
-    _nextVirtualPid = 1000; // Start virtual PIDs at 1000
-
-    // Default configuration
-    _appGroupIdentifier = @"group.com.aspauldingcode.HIAH";
-    _extensionIdentifier = @"com.aspauldingcode.HIAHDesktop.ProcessRunner";
-
-    // Listen for extension started notifications (Darwin notifications)
-    // This allows us to enable JIT immediately when an extension process starts
-    CFNotificationCenterRef center =
-        CFNotificationCenterGetDarwinNotifyCenter();
-    if (center) {
-      CFStringRef notificationName =
-          CFSTR("com.aspauldingcode.HIAHDesktop.ExtensionStarted");
-      CFNotificationCenterAddObserver(
-          center, (__bridge const void *)self, extensionStartedCallback,
-          notificationName, NULL,
-          CFNotificationSuspensionBehaviorDeliverImmediately);
-      HIAHLogInfo(HIAHLogKernel,
-                  "Registered for extension started notifications");
+    if (self = [super init]) {
+        _processTable = [NSMutableDictionary dictionary];
+        _lock = [[NSRecursiveLock alloc] init];
+        _nextPID = 1000;
+        _controlSocket = -1;
+        _isShuttingDown = NO;
+        _ioQueue = dispatch_queue_create("hiah.kernel.io", DISPATCH_QUEUE_SERIAL);
+        
+        // Defaults
+        _appGroupIdentifier = @"group.com.aspauldingcode.HIAHDesktop";
+        _extensionIdentifier = @"com.aspauldingcode.HIAHDesktop.ProcessRunner";
+        
+        [self setupControlSocket];
     }
-
-    [self setupControlSocket];
-  }
-  return self;
+    return self;
 }
 
 - (void)dealloc {
-  [self shutdown];
+    [self shutdown];
 }
 
 #pragma mark - Control Socket
 
 - (void)setupControlSocket {
-  // Use NSTemporaryDirectory() - the iOS-proper way for temp files/sockets
-  // This directory is always accessible, writable, and short enough for socket
-  // paths
-  self.socketDirectory = NSTemporaryDirectory();
-  NSLog(@"[HIAHKernel] Using NSTemporaryDirectory for sockets: %@",
-        self.socketDirectory);
-
-  // Short socket name
-  NSString *socketName = @"k.s";
-  self.controlSocketPath =
-      [self.socketDirectory stringByAppendingPathComponent:socketName];
-  NSLog(@"[HIAHKernel] Control socket: %@", self.controlSocketPath);
-
-  int serverSock = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (serverSock < 0) {
-    NSLog(@"[HIAHKernel] Failed to create control socket: %s", strerror(errno));
-    return;
-  }
-
-  struct sockaddr_un addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sun_family = AF_UNIX;
-
-  // Use absolute path instead of chdir (iOS device sandboxing)
-  const char *fullSocketPath = [self.controlSocketPath UTF8String];
-  if (strlen(fullSocketPath) >= sizeof(addr.sun_path)) {
-    NSLog(@"[HIAHKernel] Control socket path too long: %@",
-          self.controlSocketPath);
-    close(serverSock);
-    return;
-  }
-
-  strncpy(addr.sun_path, fullSocketPath, sizeof(addr.sun_path) - 1);
-  unlink(fullSocketPath); // Remove if exists
-
-  if (bind(serverSock, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
-    listen(serverSock, 5);
-    self.controlSocket = serverSock;
-    [self startControlSocketListener];
-    NSLog(@"[HIAHKernel] Control socket ready: %@", self.controlSocketPath);
-  } else {
-    NSLog(@"[HIAHKernel] Failed to bind control socket at %@: %s",
-          self.controlSocketPath, strerror(errno));
-    close(serverSock);
-  }
-}
-
-- (void)startControlSocketListener {
-  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-    while (!self.isShuttingDown && self.controlSocket >= 0) {
-      int clientSock = accept(self.controlSocket, NULL, NULL);
-      if (clientSock >= 0) {
-        [self handleControlClient:clientSock];
-      }
+    NSString *socketDir = NSTemporaryDirectory();
+    NSString *socketName = @"hiah.sock";
+    self.controlSocketPath = [socketDir stringByAppendingPathComponent:socketName];
+    
+    int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sock < 0) return;
+    
+    struct sockaddr_un addr = {0};
+    addr.sun_family = AF_UNIX;
+    const char *path = [self.controlSocketPath UTF8String];
+    if (strlen(path) >= sizeof(addr.sun_path)) {
+        close(sock);
+        return;
     }
-  });
+    strlcpy(addr.sun_path, path, sizeof(addr.sun_path));
+    unlink(path);
+    
+    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) == 0 && listen(sock, 5) == 0) {
+        self.controlSocket = sock;
+        [self startControlListener];
+    } else {
+        close(sock);
+    }
 }
 
-- (void)handleControlClient:(int)sock {
-  dispatch_async(
-      dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSMutableData *data = [NSMutableData data];
-        char buffer[1024];
-        ssize_t n;
-
-        while ((n = read(sock, buffer, sizeof(buffer))) > 0) {
-          [data appendBytes:buffer length:n];
-          // Simple newline-delimited JSON protocol
-          if (buffer[n - 1] == '\n') {
-            NSError *err;
-            NSDictionary *req = [NSJSONSerialization JSONObjectWithData:data
-                                                                options:0
-                                                                  error:&err];
-            if (req) {
-              [self processControlRequest:req socket:sock];
+- (void)startControlListener {
+    dispatch_async(self.ioQueue, ^{
+        while (!self.isShuttingDown && self.controlSocket >= 0) {
+            int client = accept(self.controlSocket, NULL, NULL);
+            if (client >= 0) {
+                [self handleClient:client];
             }
-            [data setLength:0];
-          }
+        }
+    });
+}
+
+- (void)handleClient:(int)sock {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+        char buf[4096];
+        ssize_t n = read(sock, buf, sizeof(buf) - 1);
+        if (n > 0) {
+            buf[n] = '\0';
+            NSData *data = [NSData dataWithBytes:buf length:n];
+            NSDictionary *req = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            if (req) {
+                [self handleRequest:req socket:sock];
+            }
         }
         close(sock);
-      });
+    });
 }
 
-- (void)processControlRequest:(NSDictionary *)req socket:(int)sock {
-  NSString *command = req[@"command"];
-
-  if ([command isEqualToString:@"spawn"]) {
-    NSString *path = req[@"path"];
-    NSArray *args = req[@"args"];
-    NSDictionary *env = req[@"env"];
-
-    [self spawnVirtualProcessWithPath:path
-                            arguments:args
-                          environment:env
-                           completion:^(pid_t pid, NSError *error) {
-                             NSDictionary *resp;
-                             if (error) {
-                               resp = @{
-                                 @"status" : @"error",
-                                 @"error" : error.localizedDescription
-                               };
-                             } else {
-                               resp = @{@"status" : @"ok", @"pid" : @(pid)};
-                             }
-                             NSData *respData =
-                                 [NSJSONSerialization dataWithJSONObject:resp
-                                                                 options:0
-                                                                   error:nil];
-                             write(sock, respData.bytes, respData.length);
-                             write(sock, "\n", 1);
-                           }];
-  } else if ([command isEqualToString:@"list"]) {
-    NSArray *procs = [self allProcesses];
-    NSMutableArray *procList = [NSMutableArray array];
-    for (HIAHProcess *p in procs) {
-      [procList addObject:@{
-        @"pid" : @(p.pid),
-        @"path" : p.executablePath ?: @"",
-        @"exited" : @(p.isExited),
-        @"exitCode" : @(p.exitCode)
-      }];
+- (void)handleRequest:(NSDictionary *)req socket:(int)sock {
+    NSString *cmd = req[@"command"];
+    NSDictionary *resp;
+    
+    if ([cmd isEqualToString:@"spawn"]) {
+        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+        __block pid_t resultPid = -1;
+        __block NSError *resultErr = nil;
+        
+        [self spawnProcessWithPath:req[@"path"]
+                         arguments:req[@"args"]
+                       environment:req[@"env"]
+                        completion:^(pid_t pid, NSError *error) {
+            resultPid = pid;
+            resultErr = error;
+            dispatch_semaphore_signal(sem);
+        }];
+        
+        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+        resp = resultErr ? @{@"error": resultErr.localizedDescription}
+                         : @{@"pid": @(resultPid)};
+    } else if ([cmd isEqualToString:@"list"]) {
+        NSMutableArray *list = [NSMutableArray array];
+        for (HIAHProcess *p in [self allProcesses]) {
+            [list addObject:@{
+                @"pid": @(p.pid),
+                @"path": p.executablePath ?: @"",
+                @"state": @(p.state)
+            }];
+        }
+        resp = @{@"processes": list};
+    } else if ([cmd isEqualToString:@"kill"]) {
+        [self killProcess:[req[@"pid"] intValue] signal:[req[@"signal"] intValue]];
+        resp = @{@"ok": @YES};
+    } else {
+        resp = @{@"error": @"unknown command"};
     }
-    NSDictionary *resp = @{@"status" : @"ok", @"processes" : procList};
-    NSData *respData = [NSJSONSerialization dataWithJSONObject:resp
-                                                       options:0
-                                                         error:nil];
+    
+    NSData *respData = [NSJSONSerialization dataWithJSONObject:resp options:0 error:nil];
     write(sock, respData.bytes, respData.length);
-    write(sock, "\n", 1);
-  }
 }
 
-#pragma mark - Process Management
+#pragma mark - Process Table
 
 - (void)registerProcess:(HIAHProcess *)process {
-  [self.lock lock];
-  self.processTable[@(process.pid)] = process;
-  [self.lock unlock];
-
-  NSLog(@"[HIAHKernel] Registered process %d (%@)", process.pid,
-        process.executablePath);
-
-  [[NSNotificationCenter defaultCenter]
-      postNotificationName:HIAHKernelProcessSpawnedNotification
-                    object:self
-                  userInfo:@{@"process" : process}];
+    [self.lock lock];
+    self.processTable[@(process.pid)] = process;
+    [self.lock unlock];
+    
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:HIAHKernelProcessSpawnedNotification
+                      object:self
+                    userInfo:@{@"process": process}];
 }
 
 - (void)unregisterProcessWithPID:(pid_t)pid {
-  [self.lock lock];
-  HIAHProcess *process = self.processTable[@(pid)];
-  [self.processTable removeObjectForKey:@(pid)];
-  [self.lock unlock];
-
-  NSLog(@"[HIAHKernel] Unregistered process %d", pid);
-
-  if (process) {
-    [[NSNotificationCenter defaultCenter]
-        postNotificationName:HIAHKernelProcessExitedNotification
-                      object:self
-                    userInfo:@{@"process" : process}];
-  }
+    [self.lock lock];
+    HIAHProcess *proc = self.processTable[@(pid)];
+    [self.processTable removeObjectForKey:@(pid)];
+    [self.lock unlock];
+    
+    if (proc) {
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:HIAHKernelProcessExitedNotification
+                          object:self
+                        userInfo:@{@"process": proc}];
+    }
 }
 
 - (HIAHProcess *)processForPID:(pid_t)pid {
-  [self.lock lock];
-  HIAHProcess *proc = self.processTable[@(pid)];
-  [self.lock unlock];
-  return proc;
-}
-
-- (HIAHProcess *)processForRequestIdentifier:(NSUUID *)uuid {
-  [self.lock lock];
-  __block HIAHProcess *result = nil;
-  [self.processTable enumerateKeysAndObjectsUsingBlock:^(
-                         NSNumber *key, HIAHProcess *obj, BOOL *stop) {
-    if ([obj.requestIdentifier isEqual:uuid]) {
-      result = obj;
-      *stop = YES;
-    }
-  }];
-  [self.lock unlock];
-  return result;
+    [self.lock lock];
+    HIAHProcess *proc = self.processTable[@(pid)];
+    [self.lock unlock];
+    return proc;
 }
 
 - (NSArray<HIAHProcess *> *)allProcesses {
-  [self.lock lock];
-  NSArray *processes = [self.processTable allValues];
-  [self.lock unlock];
-
-  if (processes.count == 0) {
-    HIAHLogDebug(HIAHLogKernel, "Process table is empty");
-  }
-
-  return processes;
+    [self.lock lock];
+    NSArray *procs = [self.processTable allValues];
+    [self.lock unlock];
+    return procs;
 }
 
-- (void)handleExitForPID:(pid_t)pid exitCode:(int)exitCode {
-  HIAHProcess *proc = [self processForPID:pid];
-  if (proc) {
-    proc.isExited = YES;
-    proc.exitCode = exitCode;
-    HIAHLogInfo(HIAHLogKernel, "Process %d exited with code %d", pid, exitCode);
-
-    [[NSNotificationCenter defaultCenter]
-        postNotificationName:HIAHKernelProcessExitedNotification
-                      object:self
-                    userInfo:@{@"process" : proc, @"exitCode" : @(exitCode)}];
-  }
+- (pid_t)allocatePID {
+    [self.lock lock];
+    pid_t pid = self.nextPID++;
+    [self.lock unlock];
+    return pid;
 }
 
 #pragma mark - Process Spawning
 
-- (void)spawnVirtualProcessWithPath:(NSString *)path
-                          arguments:(NSArray<NSString *> *)arguments
-                        environment:
-                            (NSDictionary<NSString *, NSString *> *)environment
-                         completion:
-                             (void (^)(pid_t pid, NSError *error))completion {
-
-  if (!path || path.length == 0) {
-    if (completion) {
-      NSError *error = [NSError
-          errorWithDomain:HIAHKernelErrorDomain
-                     code:HIAHKernelErrorInvalidPath
-                 userInfo:@{
-                   NSLocalizedDescriptionKey : @"Invalid executable path"
-                 }];
-      completion(-1, error);
-    }
-    return;
-  }
-
-  NSFileManager *fm = [NSFileManager defaultManager];
-  NSString *actualExecutablePath = path;
-
-  // Handle .app bundle paths
-  // If the path points to a .app bundle, we need to find the executable inside
-  // it
-  BOOL isDirectory = NO;
-  if ([fm fileExistsAtPath:path isDirectory:&isDirectory] && isDirectory &&
-      [path hasSuffix:@".app"]) {
-    NSLog(@"[HIAHKernel] Received .app bundle path, locating executable...");
-
-    NSString *infoPlistPath =
-        [path stringByAppendingPathComponent:@"Info.plist"];
-    NSDictionary *infoPlist =
-        [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
-    NSString *executableName = infoPlist[@"CFBundleExecutable"];
-
-    if (executableName) {
-      // Try direct path: App.app/ExecutableName
-      NSString *candidatePath =
-          [path stringByAppendingPathComponent:executableName];
-      if ([fm fileExistsAtPath:candidatePath]) {
-        actualExecutablePath = candidatePath;
-        NSLog(@"[HIAHKernel] Found executable at: %@", actualExecutablePath);
-      } else {
-        // Try Contents/MacOS path (rare on iOS but possible)
-        candidatePath = [[path stringByAppendingPathComponent:@"Contents/MacOS"]
-            stringByAppendingPathComponent:executableName];
-        if ([fm fileExistsAtPath:candidatePath]) {
-          actualExecutablePath = candidatePath;
-          NSLog(@"[HIAHKernel] Found executable at: %@", actualExecutablePath);
-        } else {
-          NSLog(@"[HIAHKernel] ERROR: Could not find executable '%@' in bundle",
-                executableName);
-          if (completion) {
-            NSError *error = [NSError
-                errorWithDomain:HIAHKernelErrorDomain
-                           code:HIAHKernelErrorInvalidPath
-                       userInfo:@{
-                         NSLocalizedDescriptionKey : [NSString
-                             stringWithFormat:
-                                 @"Executable '%@' not found in bundle",
-                                 executableName]
-                       }];
-            completion(-1, error);
-          }
-          return;
+- (void)spawnProcessWithPath:(NSString *)path
+                   arguments:(NSArray<NSString *> *)arguments
+                 environment:(NSDictionary<NSString *, NSString *> *)environment
+                  completion:(void (^)(pid_t, NSError *))completion {
+    
+    if (!path.length) {
+        if (completion) {
+            completion(-1, [self errorWithCode:HIAHKernelErrorInvalidPath
+                                       message:@"Empty path"]);
         }
-      }
-    } else {
-      NSLog(@"[HIAHKernel] ERROR: No CFBundleExecutable in Info.plist");
-      if (completion) {
-        NSError *error =
-            [NSError errorWithDomain:HIAHKernelErrorDomain
-                                code:HIAHKernelErrorInvalidPath
-                            userInfo:@{
-                              NSLocalizedDescriptionKey :
-                                  @"No CFBundleExecutable in Info.plist"
-                            }];
-        completion(-1, error);
-      }
-      return;
+        return;
     }
-  }
-
-  // Update path to actual executable
-  path = actualExecutablePath;
-  NSLog(@"[HIAHKernel] Final executable path: %@", path);
-
-  // Verify the executable exists
-  if (![fm fileExistsAtPath:path]) {
-    NSLog(@"[HIAHKernel] ERROR: Executable not found at: %@", path);
-    if (completion) {
-      NSError *error = [NSError
-          errorWithDomain:HIAHKernelErrorDomain
-                     code:HIAHKernelErrorInvalidPath
-                 userInfo:@{
-                   NSLocalizedDescriptionKey : [NSString
-                       stringWithFormat:@"Executable not found: %@", path]
-                 }];
-      completion(-1, error);
+    
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *execPath = path;
+    
+    // Handle .app bundles
+    BOOL isDir = NO;
+    if ([fm fileExistsAtPath:path isDirectory:&isDir] && isDir && [path hasSuffix:@".app"]) {
+        NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:
+                              [path stringByAppendingPathComponent:@"Info.plist"]];
+        NSString *execName = info[@"CFBundleExecutable"];
+        if (execName) {
+            execPath = [path stringByAppendingPathComponent:execName];
+        }
     }
-    return;
-  }
-
-  // CRITICAL: Ensure executable has correct permissions
-  NSDictionary *attrs = @{NSFilePosixPermissions : @0755};
-  NSError *permError = nil;
-  [fm setAttributes:attrs ofItemAtPath:path error:&permError];
-  if (permError) {
-    NSLog(@"[HIAHKernel] Warning: Could not set executable permissions: %@",
-          permError);
-  } else {
-    NSLog(@"[HIAHKernel] Set executable permissions for: %@", path);
-  }
-
-  NSError *error = nil;
-
-  // 1. Create stdout/stderr capture socket
-  // Use NSTemporaryDirectory() - iOS-proper temporary storage
-  NSString *socketDir = self.socketDirectory ?: NSTemporaryDirectory();
-
-  // Short socket name
-  NSString *socketName =
-      [NSString stringWithFormat:@"%d.s", arc4random() % 100];
-  NSString *socketPath = [socketDir stringByAppendingPathComponent:socketName];
-
-  NSLog(@"[HIAHKernel] Spawn socket: %@", socketPath);
-
-  int serverSock = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (serverSock < 0) {
-    NSLog(@"[HIAHKernel] Failed to create socket: %s", strerror(errno));
-    if (completion) {
-      NSError *err = [NSError
-          errorWithDomain:HIAHKernelErrorDomain
-                     code:HIAHKernelErrorSocketCreationFailed
-                 userInfo:@{
-                   NSLocalizedDescriptionKey : @"Failed to create output socket"
-                 }];
-      completion(-1, err);
+    
+    if (![fm fileExistsAtPath:execPath]) {
+        if (completion) {
+            completion(-1, [self errorWithCode:HIAHKernelErrorInvalidPath
+                                       message:@"File not found"]);
+        }
+        return;
     }
-    return;
-  }
-
-  struct sockaddr_un addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sun_family = AF_UNIX;
-
-  // Use absolute path instead of chdir (iOS device doesn't allow chdir to app
-  // group)
-  const char *fullSocketPath = [socketPath UTF8String];
-  if (strlen(fullSocketPath) >= sizeof(addr.sun_path)) {
-    NSLog(@"[HIAHKernel] Socket path too long: %@", socketPath);
-    close(serverSock);
-    if (completion) {
-      NSError *err =
-          [NSError errorWithDomain:HIAHKernelErrorDomain
-                              code:HIAHKernelErrorSocketCreationFailed
-                          userInfo:@{
-                            NSLocalizedDescriptionKey : @"Socket path too long"
-                          }];
-      completion(-1, err);
-    }
-    return;
-  }
-
-  strncpy(addr.sun_path, fullSocketPath, sizeof(addr.sun_path) - 1);
-  unlink(fullSocketPath); // Remove if exists
-
-  if (bind(serverSock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-    NSLog(@"[HIAHKernel] Failed to bind stdout socket at %@: %s", socketPath,
-          strerror(errno));
-    close(serverSock);
-    if (completion) {
-      NSError *err = [NSError
-          errorWithDomain:HIAHKernelErrorDomain
-                     code:HIAHKernelErrorSocketCreationFailed
-                 userInfo:@{
-                   NSLocalizedDescriptionKey :
-                       [NSString stringWithFormat:@"Failed to bind socket: %s",
-                                                  strerror(errno)]
-                 }];
-      completion(-1, err);
-    }
-    return;
-  }
-
-  listen(serverSock, 1);
-
-  // Start background thread to read from socket
-  dispatch_async(
-      dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        int clientSock = accept(serverSock, NULL, NULL);
-        if (clientSock >= 0) {
-          char buffer[1024];
-          ssize_t n;
-          while ((n = read(clientSock, buffer, sizeof(buffer) - 1)) > 0) {
-            buffer[n] = '\0';
-            NSString *output = [NSString stringWithUTF8String:buffer];
-            if (output) {
-              NSLog(@"[HIAHKernel Guest] %@", output);
-
-              if (self.onOutput) {
-                self.onOutput(0, output);
-              }
-
-              [[NSNotificationCenter defaultCenter]
-                  postNotificationName:HIAHKernelProcessOutputNotification
-                                object:self
-                              userInfo:@{@"output" : output}];
-
-              printf("%s", [output UTF8String]);
-              fflush(stdout);
+    
+    // Patch binary if needed
+    NSString *finalPath = execPath;
+    if ([HIAHMachOUtils isMHExecute:execPath]) {
+        NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                              [execPath.lastPathComponent stringByAppendingString:@".patched"]];
+        [fm removeItemAtPath:tempPath error:nil];
+        
+        if (![fm copyItemAtPath:execPath toPath:tempPath error:nil] ||
+            ![HIAHMachOUtils patchBinaryForJITLessMode:tempPath]) {
+            if (completion) {
+                completion(-1, [self errorWithCode:HIAHKernelErrorBinaryPatchFailed
+                                           message:@"Failed to patch binary"]);
             }
-          }
-          close(clientSock);
+            return;
         }
-        close(serverSock);
-        unlink([socketPath UTF8String]);
-      });
-
-  // 2. Patch binary for dlopen if needed
-  NSString *executablePath = path;
-  NSLog(@"[HIAHKernel DEBUG] Starting spawn logic for: %@", path);
-  printf("[HIAHKernel PRINTF] Starting spawn logic for: %s\n",
-         [path UTF8String]);
-  fflush(stdout);
-
-  // Check if binary needs patching (MH_EXECUTE → MH_BUNDLE)
-  BOOL isExecute = [HIAHMachOUtils isMHExecute:path];
-  NSLog(@"[HIAHKernel DEBUG] isMHExecute check result: %d", isExecute);
-
-  if (isExecute) {
-    NSLog(@"[HIAHKernel DEBUG] Binary is MH_EXECUTE, patching for dlopen...");
-
-    // Create a temporary copy for patching
-    NSString *tempPath = [NSTemporaryDirectory()
-        stringByAppendingPathComponent:
-            [[path lastPathComponent] stringByAppendingString:@".patched"]];
-
-    NSError *copyError = nil;
-    if ([[NSFileManager defaultManager] fileExistsAtPath:tempPath]) {
-      [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
+        [HIAHMachOUtils removeCodeSignature:tempPath];
+        finalPath = tempPath;
     }
-
-    if (![[NSFileManager defaultManager] copyItemAtPath:path
-                                                 toPath:tempPath
-                                                  error:&copyError]) {
-      NSLog(@"[HIAHKernel DEBUG] Failed to copy binary: %@", copyError);
-      HIAHLogError(HIAHLogKernel, "Failed to copy binary for patching: %s",
-                   [[copyError description] UTF8String]);
-      if (completion) {
-        completion(-1, copyError);
-      }
-      return;
+    
+    // Create process
+    HIAHProcess *proc = [HIAHProcess processWithPath:path
+                                           arguments:arguments
+                                         environment:environment];
+    proc.pid = [self allocatePID];
+    proc.physicalPid = getpid();
+    proc.state = HIAHProcessStateCreated;
+    
+    // Load via dlopen
+    void *handle = dlopen([finalPath UTF8String], RTLD_NOW | RTLD_LOCAL);
+    if (!handle) {
+        if (completion) {
+            completion(-1, [self errorWithCode:HIAHKernelErrorSpawnFailed
+                                       message:[NSString stringWithFormat:@"dlopen: %s", dlerror()]]);
+        }
+        return;
     }
-
-    // Patch the binary using JIT-less mode (LiveContainer approach)
-    if (![HIAHMachOUtils patchBinaryForJITLessMode:tempPath]) {
-      NSLog(@"[HIAHKernel DEBUG] Failed to patch binary");
-      HIAHLogError(HIAHLogKernel, "Failed to patch binary for dlopen");
-      if (completion) {
-        NSError *err = [NSError
-            errorWithDomain:HIAHKernelErrorDomain
-                       code:HIAHKernelErrorSpawnFailed
-                   userInfo:@{
-                     NSLocalizedDescriptionKey : @"Failed to patch binary"
-                   }];
-        completion(-1, err);
-      }
-      return;
-    }
-
-    // Remove code signature (important for dlopen)
-    [HIAHMachOUtils removeCodeSignature:tempPath];
-
-    executablePath = tempPath;
-    NSLog(@"[HIAHKernel DEBUG] Binary patched successfully: %@", tempPath);
-  } else {
-    NSLog(@"[HIAHKernel DEBUG] Binary does NOT need patching (already "
-          @"dylib/bundle)");
-  }
-
-  // 3. Load the binary via dlopen
-  NSLog(@"[HIAHKernel DEBUG] About to dlopen: %@", executablePath);
-  printf("[HIAHKernel PRINTF] Calling dlopen on: %s\n",
-         [executablePath UTF8String]);
-  fflush(stdout);
-
-  void *handle = dlopen([executablePath UTF8String], RTLD_NOW | RTLD_GLOBAL);
-
-  if (!handle) {
-    const char *dlopen_error = dlerror();
-    NSLog(@"[HIAHKernel DEBUG] dlopen FAILED: %s", dlopen_error);
-    printf("[HIAHKernel PRINTF] dlopen FAILED: %s\n", dlopen_error);
-    fflush(stdout);
-
-    if (completion) {
-      NSError *err = [NSError
-          errorWithDomain:HIAHKernelErrorDomain
-                     code:HIAHKernelErrorSpawnFailed
-                 userInfo:@{
-                   NSLocalizedDescriptionKey :
-                       [NSString stringWithFormat:@"dlopen failed: %s",
-                                                  dlopen_error ?: "(null)"]
-                 }];
-      completion(-1, err);
-    }
-    return;
-  }
-
-  NSLog(@"[HIAHKernel DEBUG] dlopen SUCCESS, handle: %p", handle);
-  printf("[HIAHKernel PRINTF] dlopen SUCCESS\n");
-  fflush(stdout);
-
-  HIAHLogInfo(HIAHLogKernel, "Binary loaded successfully via dlopen");
-
-  // 4. Create virtual process entry
-  HIAHProcess *vproc = [HIAHProcess processWithPath:path
-                                          arguments:arguments
-                                        environment:environment];
-
-  // Assign virtual PID
-  [self.lock lock];
-  vproc.pid = self.nextVirtualPid++;
-  [self.lock unlock];
-
-  // For dlopen-based execution, we don't have a separate physical PID
-  // The code runs in our process
-  vproc.physicalPid = getpid();
-
-  [self registerProcess:vproc];
-
-  NSLog(@"[HIAHKernel DEBUG] Registered virtual process PID: %d", vproc.pid);
-
-  // 5. Find and execute entry point
-  // For command-line tools like ssh/waypipe, we need to find main()
-  typedef int (*main_func_t)(int argc, char **argv, char **envp);
-  main_func_t main_func = (main_func_t)dlsym(handle, "main");
-
-  if (!main_func) {
-    // Try _main (some binaries use this)
-    main_func = (main_func_t)dlsym(handle, "_main");
-  }
-
-  if (main_func) {
-    NSLog(@"[HIAHKernel DEBUG] Found main() entry point, spawning thread...");
-    printf("[HIAHKernel PRINTF] Executing main()\n");
-    fflush(stdout);
-
-    // Execute main() in a background thread
-    dispatch_async(
-        dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-          // Prepare argc/argv
-          int argc = (int)(arguments.count + 1);
-          char **argv = malloc(sizeof(char *) * (argc + 1));
-          argv[0] = strdup([path UTF8String]);
-          for (int i = 0; i < arguments.count; i++) {
-            argv[i + 1] = strdup([arguments[i] UTF8String]);
-          }
-          argv[argc] = NULL;
-
-          // Prepare envp
-          NSMutableDictionary *fullEnv = environment
-                                             ? [environment mutableCopy]
-                                             : [NSMutableDictionary dictionary];
-          fullEnv[@"HIAH_STDOUT_SOCKET"] = socketPath;
-          if (self.controlSocketPath) {
-            fullEnv[@"HIAH_KERNEL_SOCKET"] = self.controlSocketPath;
-          }
-
-          int envCount = (int)fullEnv.count;
-          char **envp = malloc(sizeof(char *) * (envCount + 1));
-          int envIdx = 0;
-          for (NSString *key in fullEnv) {
-            NSString *value = fullEnv[key];
-            NSString *envStr = [NSString stringWithFormat:@"%@=%@", key, value];
-            envp[envIdx++] = strdup([envStr UTF8String]);
-          }
-          envp[envCount] = NULL;
-
-          // Call main()
-          NSLog(@"[HIAHKernel DEBUG] Calling main() with %d args", argc);
-          printf("[HIAHKernel PRINTF] Calling main() now...\n");
-          fflush(stdout);
-
-          int exitCode = main_func(argc, argv, envp);
-
-          NSLog(@"[HIAHKernel DEBUG] main() returned: %d", exitCode);
-          printf("[HIAHKernel PRINTF] main() returned: %d\n", exitCode);
-          fflush(stdout);
-
-          // Clean up
-          for (int i = 0; i < argc; i++) {
-            free(argv[i]);
-          }
-          free(argv);
-          for (int i = 0; i < envCount; i++) {
-            free(envp[i]);
-          }
-          free(envp);
-
-          // Mark process as exited
-          [self handleExitForPID:vproc.pid exitCode:exitCode];
+    
+    proc.handle = handle;
+    proc.state = HIAHProcessStateRunning;
+    [self registerProcess:proc];
+    
+    // Find entry point
+    typedef int (*MainFunc)(int, char **, char **);
+    MainFunc mainFunc = dlsym(handle, "main");
+    if (!mainFunc) mainFunc = dlsym(handle, "_main");
+    
+    if (mainFunc) {
+        // Execute in thread
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+            @autoreleasepool {
+                // Build argv
+                int argc = (int)(arguments.count + 1);
+                char **argv = calloc(argc + 1, sizeof(char *));
+                argv[0] = strdup([path UTF8String]);
+                for (int i = 0; i < (int)arguments.count; i++) {
+                    argv[i + 1] = strdup([arguments[i] UTF8String]);
+                }
+                
+                // Build envp
+                NSMutableDictionary *fullEnv = environment ? [environment mutableCopy] : [NSMutableDictionary dictionary];
+                if (weakSelf.controlSocketPath) {
+                    fullEnv[@"HIAH_KERNEL_SOCKET"] = weakSelf.controlSocketPath;
+                }
+                
+                int envCount = (int)fullEnv.count;
+                char **envp = calloc(envCount + 1, sizeof(char *));
+                int idx = 0;
+                for (NSString *key in fullEnv) {
+                    envp[idx++] = strdup([[NSString stringWithFormat:@"%@=%@", key, fullEnv[key]] UTF8String]);
+                }
+                
+                // Call main
+                int exitCode = mainFunc(argc, argv, envp);
+                
+                // Cleanup
+                for (int i = 0; i < argc; i++) free(argv[i]);
+                free(argv);
+                for (int i = 0; i < envCount; i++) free(envp[i]);
+                free(envp);
+                
+                [weakSelf handleExitForPID:proc.pid exitCode:exitCode];
+            }
         });
-
-    // Return success immediately (execution is async)
-    if (completion) {
-      completion(vproc.pid, nil);
     }
-  } else {
-    NSLog(@"[HIAHKernel DEBUG] No main() entry point found!");
-    HIAHLogWarning(
-        HIAHLogKernel,
-        "No main() entry point found, binary loaded but not executed");
-
-    // Still return success - the binary is loaded
+    
     if (completion) {
-      completion(vproc.pid, nil);
+        completion(proc.pid, nil);
     }
-  }
 }
 
-#pragma mark - Deprecated / Stubs
+#pragma mark - Process Control
 
-- (void)enableJITForExtensionProcessWithRetries:(pid_t)pid {
-  // Deprecated: JIT not required for dlopen mode
-  NSLog(@"[HIAHKernel] enableJITForExtensionProcessWithRetries called but "
-        @"deprecated");
+- (void)killProcess:(pid_t)pid signal:(int)signal {
+    HIAHProcess *proc = [self processForPID:pid];
+    if (!proc || proc.state >= HIAHProcessStateZombie) return;
+    
+    if (signal == SIGKILL || signal == SIGTERM) {
+        [self handleExitForPID:pid exitCode:128 + signal];
+    } else if (signal == SIGSTOP) {
+        proc.state = HIAHProcessStateStopped;
+    } else if (signal == SIGCONT) {
+        if (proc.state == HIAHProcessStateStopped) {
+            proc.state = HIAHProcessStateRunning;
+        }
+    }
 }
+
+- (pid_t)waitForProcess:(pid_t)pid status:(int *)status options:(int)options {
+    [self.lock lock];
+    
+    // Find a zombie process
+    HIAHProcess *found = nil;
+    for (HIAHProcess *proc in self.processTable.allValues) {
+        if (proc.state == HIAHProcessStateZombie) {
+            if (pid == -1 || pid == proc.pid || pid == 0 || pid == -proc.pgid) {
+                found = proc;
+                break;
+            }
+        }
+    }
+    
+    [self.lock unlock];
+    
+    if (!found) {
+        if (options & WNOHANG) return 0;
+        return -1; // Would block, but no blocking implemented
+    }
+    
+    if (status) {
+        if (found.exitSignal) {
+            *status = found.exitSignal;
+        } else {
+            *status = (found.exitCode & 0xFF) << 8;
+        }
+    }
+    
+    found.state = HIAHProcessStateTerminated;
+    return found.pid;
+}
+
+- (void)handleExitForPID:(pid_t)pid exitCode:(int)exitCode {
+    HIAHProcess *proc = [self processForPID:pid];
+    if (proc) {
+        proc.exitCode = exitCode;
+        proc.state = HIAHProcessStateZombie;
+        
+        // Close handle
+        if (proc.handle) {
+            dlclose(proc.handle);
+            proc.handle = NULL;
+        }
+        
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:HIAHKernelProcessExitedNotification
+                          object:self
+                        userInfo:@{@"process": proc, @"exitCode": @(exitCode)}];
+    }
+}
+
+#pragma mark - Lifecycle
 
 - (void)shutdown {
-  // Cleanup if needed
+    self.isShuttingDown = YES;
+    
+    if (self.controlSocket >= 0) {
+        close(self.controlSocket);
+        self.controlSocket = -1;
+    }
+    
+    if (self.controlSocketPath) {
+        unlink([self.controlSocketPath UTF8String]);
+    }
+    
+    // Terminate all processes
+    for (HIAHProcess *proc in [self allProcesses]) {
+        if (proc.state < HIAHProcessStateZombie) {
+            [self killProcess:proc.pid signal:SIGKILL];
+        }
+    }
+}
+
+#pragma mark - Helpers
+
+- (NSError *)errorWithCode:(HIAHKernelError)code message:(NSString *)message {
+    return [NSError errorWithDomain:HIAHKernelErrorDomain
+                               code:code
+                           userInfo:@{NSLocalizedDescriptionKey: message}];
 }
 
 @end

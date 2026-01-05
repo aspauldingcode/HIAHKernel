@@ -7,7 +7,7 @@
 
 #import "HIAHVPNStateMachine.h"
 #import "EMProxyBridge.h"
-#import "../../HIAHDesktop/HIAHLogging.h"
+#import "HIAHLogging.h"
 #import <UIKit/UIKit.h>
 #import <ifaddrs.h>
 #import <net/if.h>

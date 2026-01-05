@@ -11,7 +11,7 @@
 #import "LocalDevVPN/HIAHLocalDevVPNManager.h"
 #import "LocalDevVPN/HIAHLocalDevVPNSetupViewController.h"
 #import "EMProxyBridge.h"
-#import "../HIAHDesktop/HIAHLogging.h"
+#import "HIAHLogging.h"
 #import <ifaddrs.h>
 #import <net/if.h>
 

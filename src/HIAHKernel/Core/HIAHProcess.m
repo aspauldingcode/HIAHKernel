@@ -1,26 +1,28 @@
 /**
  * HIAHProcess.m
- * HIAHKernel – House in a House Virtual Kernel (for iOS)
+ * Virtual Process Implementation
  *
- * Implementation of the HIAHProcess model.
- *
- * Copyright (c) 2025 Alex Spaulding
- * Licensed under MIT License
+ * Copyright (c) 2025 Alex Spaulding - MIT License
  */
 
 #import "HIAHProcess.h"
+#import <pthread.h>
 
 @implementation HIAHProcess
 
 - (instancetype)init {
-    self = [super init];
-    if (self) {
-        _startTime = [NSDate date];
-        _pid = -1;
-        _physicalPid = -1;
-        _ppid = -1;
+    if (self = [super init]) {
+        _pid = 0;
+        _physicalPid = 0;
+        _ppid = 1; // Init as parent by default
+        _pgid = 0;
+        _sid = 0;
+        _state = HIAHProcessStateCreated;
         _exitCode = 0;
-        _isExited = NO;
+        _exitSignal = 0;
+        _startTime = [NSDate date];
+        _handle = NULL;
+        _thread = NULL;
     }
     return self;
 }
@@ -28,18 +30,21 @@
 + (instancetype)processWithPath:(NSString *)path
                       arguments:(NSArray<NSString *> *)arguments
                     environment:(NSDictionary<NSString *, NSString *> *)environment {
-    HIAHProcess *process = [[HIAHProcess alloc] init];
-    process.executablePath = path;
-    process.arguments = arguments;
-    process.environment = environment;
-    return process;
+    HIAHProcess *proc = [[self alloc] init];
+    proc.executablePath = path;
+    proc.arguments = arguments;
+    proc.environment = environment;
+    proc.workingDirectory = [[NSFileManager defaultManager] currentDirectoryPath];
+    return proc;
+}
+
+- (BOOL)isExited {
+    return _state == HIAHProcessStateTerminated || _state == HIAHProcessStateZombie;
 }
 
 - (NSString *)description {
-    return [NSString stringWithFormat:@"<HIAHProcess pid=%d physical=%d path=%@ exited=%@ exit=%d>",
-            self.pid, self.physicalPid, self.executablePath,
-            self.isExited ? @"YES" : @"NO", self.exitCode];
+    return [NSString stringWithFormat:@"<HIAHProcess pid=%d path=%@ state=%ld>",
+            _pid, _executablePath.lastPathComponent, (long)_state];
 }
 
 @end
-

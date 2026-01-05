@@ -1,72 +1,65 @@
-# HIAH Kernel
+# HIAHKernel
 
-**iOS Virtual Kernel Library for running dynamic binaries inside standard iOS apps.**
+**iOS Virtual Kernel for multi-process execution on jailed devices.**
 
-HIAHKernel is a reusable **library dependency** that enables applications (like Wawona) to spawn and manage multiple processes within their own sandbox, bypassing single-executable restrictions via `.dylib` loading.
+HIAHKernel enables iOS apps to spawn and manage multiple processes within their sandbox, combining SideStore and LiveContainer functionality into a single solution.
 
----
+## Quick Start
 
-## 🚀 Quick Start
-
-### 1. Generate Xcode Project
 ```bash
-nix run '.#xcgen'
-```
+# Enter Nix environment
+nix develop
 
-### 2. Open in Xcode
-```bash
+# Generate Xcode project
+nix run .#xcgen --impure
+
+# Open in Xcode
 open HIAHDesktop.xcodeproj
+
+# Or build from command line
+xcodebuild build -scheme HIAHDesktop -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO
 ```
 
-### 3. Configure & Run
-1. Select **HIAHDesktop** target
-2. Go to **Signing & Capabilities** → Select your **Team**
-3. Select your iPhone from device list
-4. Press **⌘R** to build and run
+## Features
 
----
+- **Virtual Kernel** – Process table, memory management, signal handling
+- **NSExtension Isolation** – Guest apps run in separate extension
+- **SideStore Features** – Apple ID auth, certificate management, JIT enablement
+- **LiveContainer Features** – Run apps in virtual filesystem, DYLD bypass
+- **Library API** – Import HIAHKernel into your own projects
 
-## ✨ Features
+## Documentation
 
-- 🧱 **Reusable Library** – Clean API for embedding dynamic execution logic
-- ⚙️ **Virtual Kernel** – Process table, memory management, and signal handling
-- 🚀 **Binary Loading** – Execute arbitrary code via `.dylib` dynamic loading
-- 🔌 **NSExtension Support** – Isolated process spawning using App Extensions
-- 📡 **IPC Layer** – Unix sockets for standard Input/Output redirection
+| Doc | Description |
+|-----|-------------|
+| [Getting Started](docs/GETTING_STARTED.md) | Build and run instructions |
+| [Architecture](docs/ARCHITECTURE.md) | System design overview |
+| [HIAHKernel](docs/HIAHKernel.md) | Core kernel API |
+| [HIAHDesktop](docs/HIAHDesktop.md) | Main app features |
+| [Library Usage](docs/LIBRARY_USAGE.md) | Using as a library |
 
----
-
-## 📂 Structure
+## Structure
 
 ```
-./src/              ← Source code (edit here)
-./project.yml       ← XcodeGen project spec
-./docs/             ← Documentation
-./flake.nix         ← Nix build system
+src/                    # Source code
+├── HIAHKernel/         # Core library (MIT)
+├── HIAHDesktop/        # Main application
+├── HIAHLoginWindow/    # Auth/signing (AGPLv3)
+├── HIAHTop/            # Process monitor
+└── extension/          # ProcessRunner NSExtension
+docs/                   # Documentation
+nix/                    # Nix derivations
 ```
 
-**Single source of truth: Everything builds from `./src/`**
-
----
-
-## 📖 Documentation
-
-- [**Integration Guide**](docs/Integration.md) – 👈 **Start Here if adding to another app**
-- [HIAH Kernel Library](docs/HIAHKernel.md) – Main API Documentation
-- [BUILD.md](BUILD.md) – Build instructions
-- [Architecture](docs/Architecture-and-Roadmap.md) – Internal design
-
-
----
-
-## 🛠️ Requirements
+## Requirements
 
 - iOS 16.0+
-- Xcode 15.0+
-- Nix (for project generation)
+- macOS 14+, Xcode 15+
+- Nix package manager
 
----
+## License
 
-## 📄 License
+- **HIAHKernel core**: MIT
+- **HIAHLoginWindow**: AGPLv3 (AltSign integration)
 
 MIT License – Copyright (c) 2025 Alex Spaulding

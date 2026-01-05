@@ -3,11 +3,127 @@
  * Handles .ipa installation to HIAH Desktop Applications folder
  */
 
-#import "../HIAHDesktop/HIAHFilesystem.h"
-#import "../HIAHKernel/Core/Utils/HIAHMachOUtils.h"
 #import <UIKit/UIKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <zlib.h>
+
+// Simple filesystem helper (self-contained)
+@interface HIAHFilesystem : NSObject
++ (instancetype)shared;
+- (NSString *)appsPath;
+@end
+
+@implementation HIAHFilesystem
++ (instancetype)shared {
+    static HIAHFilesystem *instance;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        instance = [[HIAHFilesystem alloc] init];
+    });
+    return instance;
+}
+
+- (NSString *)appsPath {
+    // Use App Group container for shared storage
+    NSString *appGroup = @"group.com.aspauldingcode.HIAHDesktop";
+    NSURL *containerURL = [[NSFileManager defaultManager] 
+        containerURLForSecurityApplicationGroupIdentifier:appGroup];
+    
+    if (containerURL) {
+        NSString *appsPath = [containerURL.path stringByAppendingPathComponent:@"Applications"];
+        [[NSFileManager defaultManager] createDirectoryAtPath:appsPath
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:nil];
+        return appsPath;
+    }
+    
+    // Fallback to Documents
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    NSString *appsPath = [paths.firstObject stringByAppendingPathComponent:@"Applications"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:appsPath
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+    return appsPath;
+}
+@end
+
+// Mach-O utilities (self-contained)
+#import <mach-o/loader.h>
+#import <mach-o/fat.h>
+
+@interface HIAHMachOUtils : NSObject
++ (BOOL)patchBinaryToDylib:(NSString *)path;
++ (BOOL)isMHExecute:(NSString *)path;
+@end
+
+@implementation HIAHMachOUtils
+
++ (BOOL)patchBinaryToDylib:(NSString *)path {
+    FILE *file = fopen(path.UTF8String, "r+b");
+    if (!file) return NO;
+    
+    // Read header
+    uint32_t magic;
+    if (fread(&magic, sizeof(magic), 1, file) != 1) {
+        fclose(file);
+        return NO;
+    }
+    
+    // Check if it's a Mach-O 64-bit file
+    if (magic != MH_MAGIC_64 && magic != MH_CIGAM_64) {
+        // May be a FAT binary - skip FAT header
+        if (magic == FAT_MAGIC || magic == FAT_CIGAM) {
+            // FAT binary - for simplicity, skip FAT binaries
+            fclose(file);
+            return NO;
+        }
+        fclose(file);
+        return NO;
+    }
+    
+    // Read full header
+    fseek(file, 0, SEEK_SET);
+    struct mach_header_64 header;
+    if (fread(&header, sizeof(header), 1, file) != 1) {
+        fclose(file);
+        return NO;
+    }
+    
+    // Check if already MH_BUNDLE (8) or MH_DYLIB (6)
+    if (header.filetype != MH_EXECUTE) {
+        fclose(file);
+        return (header.filetype == MH_BUNDLE);  // Already compatible
+    }
+    
+    // Patch to MH_BUNDLE
+    header.filetype = MH_BUNDLE;
+    fseek(file, 0, SEEK_SET);
+    if (fwrite(&header, sizeof(header), 1, file) != 1) {
+        fclose(file);
+        return NO;
+    }
+    
+    fclose(file);
+    return YES;
+}
+
++ (BOOL)isMHExecute:(NSString *)path {
+    FILE *file = fopen(path.UTF8String, "rb");
+    if (!file) return NO;
+    
+    struct mach_header_64 header;
+    if (fread(&header, sizeof(header), 1, file) != 1) {
+        fclose(file);
+        return NO;
+    }
+    fclose(file);
+    
+    return (header.magic == MH_MAGIC_64 && header.filetype == MH_EXECUTE);
+}
+
+@end
 
 @interface InstallerViewController : UIViewController <UIDocumentPickerDelegate>
 @property(nonatomic, strong) UILabel *statusLabel;
@@ -283,7 +399,7 @@
 
         // Verify it's a valid Mach-O binary
         NSData *headerData =
-            [[NSFileManager defaultManager] contentsOfFile:execPath];
+            [[NSFileManager defaultManager] contentsAtPath:execPath];
         if (headerData.length < 4) {
           [self log:@"ERROR: Executable is too small to be a valid binary"];
           [[NSFileManager defaultManager] removeItemAtPath:destPath error:nil];
@@ -296,10 +412,7 @@
         }
 
         uint32_t magic = *(uint32_t *)[headerData bytes];
-        const uint32_t MH_MAGIC_64 = 0xfeedfacf;
-        const uint32_t MH_CIGAM_64 = 0xcffaedfe;
-        const uint32_t FAT_MAGIC = 0xcafebabe;
-        const uint32_t FAT_CIGAM = 0xbebafeca;
+        // Use macros from mach-o/loader.h: MH_MAGIC_64, MH_CIGAM_64, FAT_MAGIC, FAT_CIGAM
 
         if (magic != MH_MAGIC_64 && magic != MH_CIGAM_64 &&
             magic != FAT_MAGIC && magic != FAT_CIGAM) {

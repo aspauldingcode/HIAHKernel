@@ -1,5 +1,5 @@
 #import "HIAHBackgroundRefresher.h"
-#import "../../HIAHDesktop/HIAHLogging.h"
+#import "HIAHLogging.h"
 
 @implementation HIAHBackgroundRefresher
 

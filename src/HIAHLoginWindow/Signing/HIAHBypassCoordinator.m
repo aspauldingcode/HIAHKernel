@@ -11,7 +11,7 @@
  */
 
 #import "HIAHBypassCoordinator.h"
-#import "../../HIAHDesktop/HIAHLogging.h"
+#import "HIAHLogging.h"
 #import <sys/sysctl.h>
 
 static NSString * const kAppGroupIdentifier = @"group.com.aspauldingcode.HIAHDesktop";

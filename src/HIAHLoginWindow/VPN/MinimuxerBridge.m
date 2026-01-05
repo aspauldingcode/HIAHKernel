@@ -11,7 +11,7 @@
  */
 
 #import "MinimuxerBridge.h"
-#import "../../HIAHDesktop/HIAHLogging.h"
+#import "HIAHLogging.h"
 
 // Forward declare Swift class - generated header will be imported in prefix header
 @class HIAHMinimuxer;

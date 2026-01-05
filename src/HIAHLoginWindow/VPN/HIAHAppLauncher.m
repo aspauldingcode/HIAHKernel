@@ -6,7 +6,7 @@
  */
 
 #import "HIAHAppLauncher.h"
-#import "../HIAHDesktop/HIAHLogging.h"
+#import "HIAHLogging.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 

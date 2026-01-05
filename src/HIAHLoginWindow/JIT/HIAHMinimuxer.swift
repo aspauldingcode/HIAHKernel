@@ -87,8 +87,9 @@ import Foundation
                 let startFn: MinimuxerStartWithLoggerFunc = startWithLogger
                 try startFn(pairingFilePath, logPathToUse, true)
             } else {
-                // Reference the global `start` function explicitly
-                let startFn: MinimuxerStartFunc = { try HIAHDesktop.start($0, $1) }
+                // Use the global `start` function from minimuxer Swift bridge
+                // Imported from src/Vendored/sidestore/include/minimuxer.swift
+                let startFn: MinimuxerStartFunc = start
                 try startFn(pairingFilePath, logPathToUse)
             }
             

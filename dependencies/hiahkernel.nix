@@ -503,7 +503,7 @@ LAUNCHER
       
       echo "Start Building"
       
-      HIAHFLAGS="-arch $ARCH -isysroot $SDKROOT -mios-simulator-version-min=16.0 -fobjc-arc -I${iosSimulator}/include -Isrc -Isrc/HIAHTop -Isrc/HIAHDesktop -Isrc/HIAHKernel/Public -Isrc/HIAHKernel/Core/Utils -Isrc/HIAHLoginWindow/UI -Isrc/HIAHLoginWindow/VPN -Isrc/HIAHLoginWindow/JIT -Isrc/HIAHLoginWindow/Refresh -Isrc/Vendored/Roxas/Sources/Roxas/include -Isrc/Vendored/AltSign/AltSign/include"
+      HIAHFLAGS="-arch $ARCH -isysroot $SDKROOT -mios-simulator-version-min=16.0 -fobjc-arc -I${iosSimulator}/include -Isrc -Isrc/HIAHTop -Isrc/HIAHDesktop -Isrc/HIAHKernel/Public -Isrc/HIAHKernel/Core/Utils -Isrc/HIAHLoginWindow/UI -Isrc/HIAHLoginWindow/VPN -Isrc/HIAHLoginWindow/JIT -Isrc/HIAHLoginWindow/Refresh -Isrc/Vendored/Roxas/Sources/Roxas/include -Isrc/Vendored/AltSign/AltSign/include -Isrc/Vendored/sidestore/include"
       
       # Compile HIAHTop components (reuse from iosTopApp build)
       echo "Compiling HIAHLogging.m..."
@@ -572,6 +572,9 @@ LAUNCHER
         src/HIAHLoginWindow/JIT/HIAHMinimuxer.swift \
         src/HIAHLoginWindow/JIT/HIAHMinimuxerJIT.swift \
         src/HIAHLoginWindow/JIT/HIAHJITEnabler.swift \
+        src/Vendored/sidestore/include/minimuxer.swift \
+        src/Vendored/sidestore/include/minimuxer-helpers.swift \
+        src/Vendored/sidestore/include/SwiftBridgeCore.swift \
         -o HIAHSwiftBridge.o \
         -whole-module-optimization \
         -target arm64-apple-ios16.0-simulator \
@@ -579,7 +582,8 @@ LAUNCHER
         -emit-objc-header-path src/HIAHDesktop/HIAHDesktop-Swift.h \
         -Isrc/HIAHDesktop -Isrc/HIAHWindowServer -Isrc/HIAHKernel/Public \
         -Isrc/Vendored/Roxas/Sources/Roxas/include \
-        -Isrc/Vendored/AltSign/AltSign/include
+        -Isrc/Vendored/AltSign/AltSign/include \
+        -Isrc/Vendored/sidestore/include
       
       echo "Compiling HIAHDesktopApp.m..."
       $CC -c src/HIAHDesktop/HIAHDesktopApp.m -o HIAHDesktopApp.o $HIAHFLAGS -Isrc/HIAHWindowServer -Isrc/HIAHDesktop
@@ -820,7 +824,8 @@ LAUNCHER
         -mios-simulator-version-min=15.0 \
         -framework UIKit \
         -framework Foundation \
-        -framework UniformTypeIdentifiers
+        -framework UniformTypeIdentifiers \
+        -lz
       
       mkdir -p HIAHInstaller.app
       cp HIAHInstaller HIAHInstaller.app/

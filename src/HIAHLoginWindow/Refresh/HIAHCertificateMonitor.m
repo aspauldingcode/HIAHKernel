@@ -1,5 +1,5 @@
 #import "HIAHCertificateMonitor.h"
-#import "../../HIAHDesktop/HIAHLogging.h"
+#import "HIAHLogging.h"
 #import "HIAHBackgroundRefresher.h"
 
 @interface HIAHCertificateMonitor ()

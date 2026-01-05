@@ -11,7 +11,7 @@ let
   iosModuleSelf = rec {
     buildForIOS =
       name: entry:
-      (import ./platforms/ios.nix {
+      (import ./deps/platforms/ios.nix {
         inherit
           lib
           pkgs

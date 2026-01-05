@@ -2,7 +2,7 @@ name: HIAHDesktop
 options:
   bundleIdPrefix: com.aspauldingcode
   deploymentTarget:
-    iOS: "16.0"  # Minimum iOS version for real device compatibility (matches Info.plist)
+    iOS: "16.0"
   developmentLanguage: en
   generateEmptyDirectories: true
 
@@ -20,555 +20,201 @@ schemes:
     archive:
       config: Release
 
+  HIAHKernel:
+    build:
+      targets:
+        HIAHKernel: all
+    run:
+      config: Debug
+
 settings:
   base:
     PRODUCT_NAME: HIAHDesktop
     MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
-    
-    # Project-level settings (targets can inherit)
-    DEVELOPMENT_TEAM: ""  # Set by user in Xcode
+    DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
-    
-    # String Catalogs - enable symbol generation (Xcode recommendation)
-    SWIFT_EMIT_LOC_STRINGS: true
-    
-    # User Script Sandboxing - DISABLED for build scripts that need file access
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     BUILD_LIBRARY_FOR_DISTRIBUTION: NO
-    
-    # Exclude x86_64 for simulator - our vendor libs only support arm64 simulator
-    # This only affects simulator builds; real device builds are always arm64
     EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+    ENABLE_BITCODE: NO
+    
+    # Nix store dependency paths (Rust)
+    EM_PROXY_PATH: /nix/store/8y6z7a777kv0sqdsxa6259dc279xk80d-em-proxy-unstable-2025-12-29
+    MINIMUXER_PATH: /nix/store/jyrjc98bk7m4hzpiy9dr7ys0x8rr5bgw-minimuxer-unstable-2025-12-29
+    
+    # Nix store dependency paths (Swift)
+    ROXAS_PATH: /nix/store/zfrfzv0grfn43yjp961a0qmz62i0mxy4-roxas-unstable-2025-12-29
+    ALTSIGN_PATH: /nix/store/yxm2na70kh2s3vghqpmcfj4189fqdv5z-altsign-spm-unstable-2025-12-29
+    
+    # Nix store dependency paths (C libraries - iOS Simulator)
+    OPENSSL_SIM_PATH: /nix/store/m1wgizw9wp78xnr6rj9d67lpsrqc3s2f-openssl-ios-sim
+    ZSIGN_SIM_PATH: /nix/store/173agfc77vg4mvqamlfz2rp121aszw3f-zsign-unstable-2025-01-15
+    LIBPLIST_SIM_PATH: /nix/store/p8s5p5cghlgz2765mmykcvprm5japrxh-libplist-ios-sim
+    LIBIMOBILEDEVICE_GLUE_SIM_PATH: /nix/store/4349vl9rsp0r78wgr6zvmn3nq74i8gnk-libimobiledevice-glue-ios-sim
+    LIBUSBMUXD_SIM_PATH: /nix/store/371w2j662yx13c7dmhk26pn4wcv16bzk-libusbmuxd-ios-sim
+    LIBIMOBILEDEVICE_SIM_PATH: /nix/store/204x42x0q67qm132iki8171n5s0rj15s-libimobiledevice-ios-sim
+    
+    # Nix store dependency paths (C libraries - iOS Device)
+    OPENSSL_IOS_PATH: /nix/store/6gaz408d06whdrpagyfgz4p6k6ps7zz1-openssl-ios
+    ZSIGN_IOS_PATH: /nix/store/c34nm5qvdldp5hasbgwa7qs9ikfgbf1q-zsign-unstable-2025-01-15
+    LIBPLIST_IOS_PATH: /nix/store/ap17ci05kiavdh98w5cc8iqiz7xl751s-libplist-ios
+    LIBIMOBILEDEVICE_GLUE_IOS_PATH: /nix/store/cmjzmpcrvwv1llhl65153js8gg3jklm6-libimobiledevice-glue-ios
+    LIBUSBMUXD_IOS_PATH: /nix/store/sykj4r42bibjcbssc7wgfjimb0sgqk45-libusbmuxd-ios
+    LIBIMOBILEDEVICE_IOS_PATH: /nix/store/r67v2kj3armw5ld82idlygr82wn6hmq4-libimobiledevice-ios
+
   configs:
     Debug:
       ONLY_ACTIVE_ARCH: YES
-      STRING_CATALOG_GENERATE_SYMBOLS: YES
-      ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+      SWIFT_OPTIMIZATION_LEVEL: -Onone
+      GCC_OPTIMIZATION_LEVEL: "0"
+      SWIFT_COMPILATION_MODE: incremental
+
     Release:
       ONLY_ACTIVE_ARCH: NO
-      STRING_CATALOG_GENERATE_SYMBOLS: YES
-      ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
-
-packages:
-  AltSign:
-    path: dependencies/swift-packages/AltSign
-  Roxas:
-    path: dependencies/swift-packages/Roxas
+      SWIFT_OPTIMIZATION_LEVEL: -Osize
+      SWIFT_WHOLE_MODULE_OPTIMIZATION: YES
+      SWIFT_COMPILATION_MODE: wholemodule
+      GCC_OPTIMIZATION_LEVEL: s
+      DEAD_CODE_STRIPPING: YES
+      STRIP_INSTALLED_PRODUCT: YES
 
 targets:
   HIAHKernel:
     type: framework
     platform: iOS
+    info:
+      path: src/HIAHKernel/Info.plist
+    dependencies:
+      - framework: Security.framework
+      - framework: Foundation.framework
     sources:
       - path: src/HIAHKernel/Public
         headerVisibility: public
       - path: src/HIAHKernel/Core
-        headerVisibility: public
+        headerVisibility: project
     settings:
       PRODUCT_NAME: HIAHKernel
       PRODUCT_BUNDLE_IDENTIFIER: com.aspauldingcode.HIAHKernel
       SKIP_INSTALL: YES
       MACH_O_TYPE: mh_dylib
-      DEFINES_MODULE: YES
-      DYLIB_COMPATIBILITY_VERSION: 1
-      DYLIB_CURRENT_VERSION: 1
-      INSTALL_PATH: $(LOCAL_LIBRARY_DIR)/Frameworks
+      DEFINES_MODULE: NO
+      CLANG_ENABLE_MODULES: NO
+      CLANG_CXX_LANGUAGE_STANDARD: c++17
       HEADER_SEARCH_PATHS:
         - $(SRCROOT)/src/HIAHKernel/Public
+        - $(SRCROOT)/src/HIAHKernel/Core
         - $(SRCROOT)/src/HIAHKernel/Core/Hooks
         - $(SRCROOT)/src/HIAHKernel/Core/Logging
+        - $(SRCROOT)/src/HIAHKernel/Core/Utils
+        - $(SRCROOT)/src/HIAHKernel/Core/Signing
+        - /nix/store/m1wgizw9wp78xnr6rj9d67lpsrqc3s2f-openssl-ios-sim/include
+        - /nix/store/173agfc77vg4mvqamlfz2rp121aszw3f-zsign-unstable-2025-01-15/include
+        - /nix/store/173agfc77vg4mvqamlfz2rp121aszw3f-zsign-unstable-2025-01-15/include/zsign
+        - /nix/store/173agfc77vg4mvqamlfz2rp121aszw3f-zsign-unstable-2025-01-15/include/zsign/common
+        - /nix/store/p8s5p5cghlgz2765mmykcvprm5japrxh-libplist-ios-sim/include
+        - /nix/store/4349vl9rsp0r78wgr6zvmn3nq74i8gnk-libimobiledevice-glue-ios-sim/include
+        - /nix/store/371w2j662yx13c7dmhk26pn4wcv16bzk-libusbmuxd-ios-sim/include
+        - /nix/store/204x42x0q67qm132iki8171n5s0rj15s-libimobiledevice-ios-sim/include
+      LIBRARY_SEARCH_PATHS:
+        - /nix/store/m1wgizw9wp78xnr6rj9d67lpsrqc3s2f-openssl-ios-sim/lib
+        - /nix/store/173agfc77vg4mvqamlfz2rp121aszw3f-zsign-unstable-2025-01-15/lib
+        - /nix/store/p8s5p5cghlgz2765mmykcvprm5japrxh-libplist-ios-sim/lib
+        - /nix/store/4349vl9rsp0r78wgr6zvmn3nq74i8gnk-libimobiledevice-glue-ios-sim/lib
+        - /nix/store/371w2j662yx13c7dmhk26pn4wcv16bzk-libusbmuxd-ios-sim/lib
+        - /nix/store/204x42x0q67qm132iki8171n5s0rj15s-libimobiledevice-ios-sim/lib
+      OTHER_LDFLAGS:
+        - -lzsign
+        - -lssl
+        - -lcrypto
+        - -lc++
+
   HIAHProcessRunner:
     type: app-extension
     platform: iOS
-    
-    attributes:
-      SystemCapabilities:
-        com.apple.ApplicationGroups.iOS:
-          enabled: true
-    
     info:
       path: src/extension/Info.plist
-      properties:
-        MinimumOSVersion: "16.0"
-        NSExtension:
-          NSExtensionPointIdentifier: com.apple.process-runner
-          NSExtensionPrincipalClass: HIAHExtensionHandler
-          NSExtensionAttributes:
-            AllowBackgroundExecution: true
-    
-    entitlements:
-      path: src/extension/Entitlements.plist
-      properties:
-        com.apple.security.application-groups:
-          - group.com.aspauldingcode.HIAHDesktop
-    
+    dependencies:
+      - target: HIAHKernel
+        embed: false
+        link: true
+      - framework: Security.framework
+      - framework: Foundation.framework
     sources:
-      # Extension code
-      - path: src/extension/HIAHProcessRunner.m
-      
-      # Signer (used by extension)
-      - path: src/extension/HIAHSigner.h
-      - path: src/extension/HIAHSigner.m
-      
-      # Bypass status (extension can read shared status)
-      - path: src/extension/HIAHBypassStatus.h
-      - path: src/extension/HIAHBypassStatus.m
-      
-      # Logging system (shared with extension)
-      - path: src/HIAHKernel/Public/HIAHLogging.h
-      - path: src/HIAHKernel/Core/Logging/HIAHLogging.m
-      
-      # Mach-O Utils (shared with extension)
-      - path: src/HIAHDesktop/HIAHMachOUtils.h
-      - path: src/HIAHDesktop/HIAHMachOUtils.m
-      
-      # HIAH Hook System (for function interception)
-      - path: src/HIAHKernel/Core/Hooks/HIAHHook.h
-      - path: src/HIAHKernel/Core/Hooks/HIAHHook.c
-      
-      # Dyld Bypass System (for code signature bypass)
-      - path: src/HIAHKernel/Core/Hooks/HIAHDyldBypass.h
-      - path: src/HIAHKernel/Core/Hooks/HIAHDyldBypass.m
-      
-      # ZSign - Programmatic signing library (like LiveContainer)
-      # Used for JIT-less mode binary signing without ldid/codesign
-      # ZSign is compiled via Nix as a static library (libzsign.a)
-      # We include the Objective-C wrapper (ZSigner) that provides the API HIAHSigner.m expects
-      # This wrapper is OUR code, not dependency source
-      - path: src/zsign/ZSigner.h
-      - path: src/zsign/ZSigner.mm
-    
+      - path: src/extension
+        excludes:
+          - "*.plist"
+      - path: src/HIAHKernel/Public
+      - path: src/HIAHKernel/Core
+      - path: src/TestSupport
     settings:
-      INFOPLIST_FILE: src/extension/Info.plist
-      GENERATE_INFOPLIST_FILE: NO
-      CODE_SIGN_ENTITLEMENTS: src/extension/Entitlements.plist
-      PRODUCT_BUNDLE_IDENTIFIER: com.aspauldingcode.HIAHDesktop.ProcessRunner
-      PRODUCT_NAME: HIAHProcessRunner
-      
-      # Extension-specific settings
-      SKIP_INSTALL: NO
-      
-      # Build settings
-      HEADER_SEARCH_PATHS:
-        - $(SRCROOT)/src
-        - $(SRCROOT)/src/hooks
-        - $(SRCROOT)/dependencies/zsign
-        - $(SRCROOT)/dependencies/zsign/include
-        - $(SRCROOT)/dependencies/zsign/include/zsign
-        - $(SRCROOT)/dependencies/zsign/include/zsign/common
-      OTHER_LDFLAGS:
-        - -ObjC
-        - -Wl,-export_dynamic
-        - -lc++
-        - -L$(SRCROOT)/dependencies/zsign/lib
-        - -lzsign-sim
-      
-      OTHER_LDFLAGS[sdk=iphoneos*]:
-        - -ObjC
-        - -Wl,-export_dynamic
-        - -lc++
-        - -L$(SRCROOT)/dependencies/zsign/lib
-        - -lzsign-ios
-      # Also add library search path for device builds
-      LIBRARY_SEARCH_PATHS[sdk=iphoneos*]:
-        - $(SRCROOT)/dependencies/zsign/lib
+      PRODUCT_BUNDLE_IDENTIFIER: com.aspauldingcode.HIAHDesktop.HIAHProcessRunner
       ENABLE_BITCODE: NO
-      
-      # Enable C++ compilation for ZSign (.cpp and .mm files)
+      CODE_SIGN_ENTITLEMENTS: src/extension/Entitlements.plist
+      CLANG_ENABLE_MODULES: NO
       CLANG_CXX_LANGUAGE_STANDARD: c++17
-      CLANG_CXX_LIBRARY: libc++
-      
-      # ZSign compiler flags
-      # Use conditional compilation to disable OpenSSL code in ad-hoc mode
-      # Since HIAH only uses ZSign for ad-hoc signing (InitAdhoc), we don't need OpenSSL
-      OTHER_CFLAGS:
-        - -Wno-unused-variable
-        - -Wno-unused-function
-        - -Wno-deprecated-declarations
-        - -Wno-error=unused-variable
-        - -Wno-error=unused-function
-        - -Wno-error=deprecated-declarations
-        - -DZSIGN_ADHOC_ONLY=1
-      
-      # Ensure symbols are exported
-      GCC_SYMBOLS_PRIVATE_EXTERN: NO
-      STRIP_INSTALLED_PRODUCT: NO
-    
-    preBuildScripts:
-      - name: Verify Extension Info.plist
-        script: |
-          set -e
-          INFO_PLIST="${SRCROOT}/src/extension/Info.plist"
-          VERIFY_MARKER="${DERIVED_FILE_DIR}/extension_info_verified"
-          
-          # Check if Info.plist changed since last verification
-          if [ -f "${VERIFY_MARKER}" ] && [ "${INFO_PLIST}" -ot "${VERIFY_MARKER}" ]; then
-            echo "✅ Extension Info.plist already verified (unchanged)"
-            exit 0
-          fi
-          
-          # Verify NSExtension dictionary exists
-          if ! plutil -extract NSExtension raw "${INFO_PLIST}" >/dev/null 2>&1; then
-            echo "❌ ERROR: NSExtension dictionary missing from ${INFO_PLIST}"
-            echo "   This is REQUIRED for the extension to install on iOS devices."
-            exit 1
-          fi
-          
-          # Create marker file
-          mkdir -p "${DERIVED_FILE_DIR}"
-          touch "${VERIFY_MARKER}"
-          echo "✅ Extension Info.plist verified: NSExtension dictionary present"
-        shell: /bin/bash
-        showEnvVars: false
-        outputFiles:
-          - "${DERIVED_FILE_DIR}/extension_info_verified"
-        inputFiles:
-          - "${SRCROOT}/src/extension/Info.plist"
-  
-  # ============================================================================
-  # HIAHVPNExtension - DISABLED
-  # ============================================================================
-  # Network Extensions require a PAID Apple Developer account ($99/year).
-  # Personal/free developer accounts do not support this capability.
-  #
-  # To enable VPN functionality, you need either:
-  # 1. A paid Apple Developer Program membership
-  # 2. Use the StoreAppsVPN approach (like SideStore does with LocalDevVPN)
-  #
-  # The VPN extension files are kept in: src/HIAHLoginWindow/VPN/Extension/
-  # Uncomment this target when you have a paid developer account.
-  # ============================================================================
-  
+      HEADER_SEARCH_PATHS:
+        - $(SRCROOT)/src/HIAHKernel/Public
+        - $(SRCROOT)/src/HIAHKernel/Core
+        - $(SRCROOT)/src/HIAHKernel/Core/Hooks
+        - $(SRCROOT)/src/HIAHKernel/Core/Signing
+        - $(SRCROOT)/src/HIAHKernel/Core/Utils
+        - $(SRCROOT)/src/HIAHKernel/Core/Logging
+        - $(SRCROOT)/src/TestSupport
+        - /nix/store/173agfc77vg4mvqamlfz2rp121aszw3f-zsign-unstable-2025-01-15/include
+        - /nix/store/173agfc77vg4mvqamlfz2rp121aszw3f-zsign-unstable-2025-01-15/include/zsign
+        - /nix/store/173agfc77vg4mvqamlfz2rp121aszw3f-zsign-unstable-2025-01-15/include/zsign/common
+        - /nix/store/m1wgizw9wp78xnr6rj9d67lpsrqc3s2f-openssl-ios-sim/include
+      LIBRARY_SEARCH_PATHS:
+        - /nix/store/173agfc77vg4mvqamlfz2rp121aszw3f-zsign-unstable-2025-01-15/lib
+        - /nix/store/m1wgizw9wp78xnr6rj9d67lpsrqc3s2f-openssl-ios-sim/lib
+      OTHER_LDFLAGS:
+        - -lzsign
+        - -lssl
+        - -lcrypto
+        - -lc++
+
   HIAHDesktop:
     type: application
     platform: iOS
-    
-    attributes:
-      SystemCapabilities:
-        com.apple.ApplicationGroups.iOS:
-          enabled: true
-        # Network Extensions requires paid Apple Developer account:
-        # com.apple.NetworkExtensions.iOS:
-        #   enabled: true
-    
+    info:
+      path: src/HIAHDesktop/Info.plist
     dependencies:
-      - target: HIAHProcessRunner
-        embed: true
-        link: false
-      # NOTE: VPN Extension disabled - requires paid Apple Developer account
-      # Uncomment when you have a paid developer account:
-      # - target: HIAHVPNExtension
-      #   embed: true
-      #   link: false
-      - package: AltSign
-        product: AltSign-Static
-      - package: Roxas
-        product: Roxas
       - target: HIAHKernel
         embed: true
         link: true
-    
-    info:
-      path: src/HIAHDesktop/Info.plist
-      properties:
-        CFBundleDisplayName: HIAH Desktop
-        CFBundleName: HIAH Desktop
-        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
-        MinimumOSVersion: "16.0"
-        
-        # Launch screen (fixes zoomed display)
-        UILaunchScreen: {}
-        
-        # Support all orientations (required for proper screen sizing)
-        UISupportedInterfaceOrientations:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
-        UISupportedInterfaceOrientations~ipad:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationPortraitUpsideDown
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
-        
-        # Files app integration - expose Documents directory
-        UIFileSharingEnabled: true
-        LSSupportsOpeningDocumentsInPlace: true
-        
-        # URL schemes we need to query (required for canOpenURL: to work on iOS)
-        LSApplicationQueriesSchemes:
-          - itms-apps
-        
-        # Background modes for certificate refresh
-        UIBackgroundModes:
-          - fetch
-          - processing
-        
-        # Background task identifiers (required for BGTaskScheduler)
-        BGTaskSchedulerPermittedIdentifiers:
-          - com.aspauldingcode.HIAHDesktop.refresh
-        
-        UIApplicationSceneManifest:
-          UIApplicationSupportsMultipleScenes: true
-          UISceneConfigurations:
-            UIWindowSceneSessionRoleApplication:
-              - UISceneConfigurationName: Default Configuration
-                UISceneDelegateClassName: SceneDelegate
-    
-    entitlements:
-      path: src/HIAHDesktop/HIAHDesktop.entitlements
-      properties:
-        com.apple.security.application-groups:
-          - group.com.aspauldingcode.HIAHDesktop
-    
+      - target: HIAHProcessRunner
+        embed: true
+      - framework: UIKit.framework
+      - framework: Foundation.framework
+      - framework: CoreGraphics.framework
     sources:
-      # Core
-      # - path: src/HIAHKernel.h
-      # - path: src/HIAHKernel.m
-      # - path: src/HIAHProcess.h
-      # - path: src/HIAHProcess.m
-      
-      # Desktop
       - path: src/HIAHDesktop
-        excludes:
-          - "Info.plist"
-      
-      # HIAH LoginWindow (integrated into Desktop)
-      - path: src/HIAHLoginWindow/UI
-        excludes:
-          - "LoginWindowApp.swift"  # Exclude @main - HIAHDesktop has its own main
-      - path: src/HIAHLoginWindow/Auth
-      - path: src/HIAHLoginWindow/VPN/EMProxyBridge.h
-      - path: src/HIAHLoginWindow/VPN/EMProxyBridge.m
-      - path: src/HIAHLoginWindow/VPN/HIAHVPNStateMachine.h
-      - path: src/HIAHLoginWindow/VPN/HIAHVPNStateMachine.m
-      - path: src/HIAHLoginWindow/VPN/HIAHVPNManager.h
-      - path: src/HIAHLoginWindow/VPN/HIAHVPNManager.m
-      - path: src/HIAHLoginWindow/VPN/HIAHVPN.h
-      - path: src/HIAHLoginWindow/VPN/HIAHVPN.m
-      # LocalDevVPN Integration (official SideStore VPN)
-      - path: src/HIAHLoginWindow/VPN/LocalDevVPN/HIAHLocalDevVPNManager.h
-      - path: src/HIAHLoginWindow/VPN/LocalDevVPN/HIAHLocalDevVPNManager.m
-      - path: src/HIAHLoginWindow/VPN/LocalDevVPN/HIAHLocalDevVPNSetupViewController.h
-      - path: src/HIAHLoginWindow/VPN/LocalDevVPN/HIAHLocalDevVPNSetupViewController.m
-      - path: src/HIAHLoginWindow/VPN/HIAHVPNReminderViewController.h
-      - path: src/HIAHLoginWindow/VPN/HIAHVPNReminderViewController.m
-      - path: src/HIAHLoginWindow/VPN/HIAHPrivateAppLauncher.h
-      - path: src/HIAHLoginWindow/VPN/HIAHPrivateAppLauncher.m
-      - path: src/HIAHLoginWindow/VPN/MinimuxerBridge.h
-      - path: src/HIAHLoginWindow/VPN/MinimuxerBridge.m
-      - path: src/HIAHLoginWindow/JIT
-      - path: src/HIAHLoginWindow/Signing
-      - path: src/HIAHLoginWindow/Refresh
-      - path: src/HIAHLoginWindow/HIAHLoginWindow-Bridging-Header.h
-      
-      # Utilities
-      - path: src/HIAHDesktop/HIAHMachOUtils.h
-      - path: src/HIAHDesktop/HIAHMachOUtils.m
-      
-      # Signer (shared with extension)
-      - path: src/extension/HIAHSigner.h
-      - path: src/extension/HIAHSigner.m
-      
-      # Swift Bridge
-      - path: src/HIAHDesktop/HIAHSwiftBridge.swift
-      
-      # Minimuxer Swift Bridge (for JIT enablement via lockdownd)
-      - path: dependencies/sidestore/include/SwiftBridgeCore.swift
-      - path: dependencies/sidestore/include/minimuxer.swift
-      - path: dependencies/sidestore/include/minimuxer-helpers.swift
-      
-      # ============================================================================
-      # libimobiledevice stack (built by Nix, linked as static libraries)
-      # These provide the C symbols that minimuxer's rusty_libimobiledevice expects
-      # Source code is fetched from GitHub by Nix, not stored in this repo
-      # ============================================================================
-      
-      # libplist - AltSign's ldid-core already compiles libplist (older version)
-      # We provide a compatibility shim for newer libplist functions that
-      # minimuxer/libimobiledevice need but AltSign's version doesn't have
-      # This is our code, not dependency source, so we keep it
-      - path: Dependencies/libplist-compat.c
-        compilerFlags:
-          - -w
-      # Hooks
-      # - path: src/hooks
-      
-      # Window Server
-      - path: src/HIAHWindowServer
-      
-      # Top (Process Manager)
-      - path: src/HIAHTop
-        excludes:
-          - "Info.plist"
-          - "main.m"
-      
-      # Sample Apps (Include in main target for in-process execution)
-      - path: src/SampleApps
-        excludes:
-          - "**/Info.plist"
-      
-      # HIAHTerminal (Include in main target)
-      - path: src/HIAHTerminal
-        excludes:
-          - "Info.plist"
-    
+      - path: src/Config
     settings:
-      INFOPLIST_FILE: src/HIAHDesktop/Info.plist
-      CODE_SIGN_ENTITLEMENTS: src/HIAHDesktop/HIAHDesktop.entitlements
       PRODUCT_BUNDLE_IDENTIFIER: com.aspauldingcode.HIAHDesktop
-      
-      # Deployment target - minimum iOS version for device compatibility
-      IPHONEOS_DEPLOYMENT_TARGET: "16.0"
-      
-      # LoginWindow bridging (integrated)
-      SWIFT_OBJC_BRIDGING_HEADER: $(SRCROOT)/src/HIAHLoginWindow/HIAHLoginWindow-Bridging-Header.h
-      
-      # Inherit from project settings (don't override)
-      # CODE_SIGN_STYLE and DEVELOPMENT_TEAM come from project level
-      
-      # Build settings
+      CODE_SIGN_ENTITLEMENTS: src/HIAHDesktop/HIAHDesktop.entitlements
+      CLANG_ENABLE_MODULES: NO
       HEADER_SEARCH_PATHS:
-        - $(SRCROOT)/src
-        - $(SRCROOT)/src/**
-        - $(SRCROOT)/src/HIAHLoginWindow/VPN
-        - $(SRCROOT)/dependencies/sidestore/include
-        # SPM package headers (for bridging header access)
-        - $(SRCROOT)/dependencies/swift-packages/AltSign/AltSign/include
-        - $(SRCROOT)/dependencies/swift-packages/Roxas/Sources/Roxas/include
-        - $(SRCROOT)/dependencies/swift-packages/Roxas/Sources/Roxas/include/Roxas
-        # libimobiledevice stack headers (staged from Nix builds, no source code)
-        # Headers are staged to dependencies/libimobiledevice/include/ by Nix
-        - $(SRCROOT)/dependencies/libimobiledevice/include
-        # Also check legacy Dependencies paths for compatibility during transition
-        - $(SRCROOT)/Dependencies/libplist/include
-        - $(SRCROOT)/Dependencies/libplist/src
-        - $(SRCROOT)/Dependencies/libplist/libcnary/include
-        - $(SRCROOT)/Dependencies/libimobiledevice-glue/include
-        - $(SRCROOT)/Dependencies/libimobiledevice-glue/src
-        - $(SRCROOT)/Dependencies/libusbmuxd/include
-        - $(SRCROOT)/Dependencies/libusbmuxd/src
-        - $(SRCROOT)/Dependencies/libimobiledevice/include
-        - $(SRCROOT)/Dependencies/libimobiledevice/src
-        - $(SRCROOT)/Dependencies/libimobiledevice/common
-        - $(SRCROOT)/Dependencies/libimobiledevice
-        - $(SRCROOT)/Dependencies/libimobiledevice/src
-        - $(SRCROOT)/Dependencies/libimobiledevice/common
-        - $(SRCROOT)/Dependencies/libimobiledevice
-        - $(SRCROOT)/src/HIAHKernel/Public      
-      LIBRARY_SEARCH_PATHS:
-        - $(SRCROOT)/dependencies/sidestore/lib
-        # libimobiledevice stack libraries (staged from Nix builds)
-        - $(SRCROOT)/dependencies/libimobiledevice/lib
-      LIBRARY_SEARCH_PATHS[sdk=iphoneos*]:
-        - $(SRCROOT)/dependencies/sidestore/lib
-        # iOS Device libraries
-        - $(SRCROOT)/dependencies/libimobiledevice/lib-ios
-      
-      OTHER_LDFLAGS:
-        - -lz
-        - -ObjC
-        - -lem_proxy-sim
-        - -lminimuxer-sim
-        # Link against libimobiledevice stack (built by Nix, no source code)
-        - -L$(SRCROOT)/dependencies/libimobiledevice/lib
-        - -limobiledevice
-        - -lusbmuxd
-        - -limobiledevice-glue
-        - -lplist
-        # Suppress linker warnings about version mismatches
-        - -Wl,-w
-      
-      OTHER_LDFLAGS[sdk=iphoneos*]:
-        - -lz
-        - -ObjC
-        - -lem_proxy-ios
-        # iOS Device libraries
-        - -L$(SRCROOT)/dependencies/libimobiledevice/lib-ios
-        - -limobiledevice
-        - -lusbmuxd
-        - -limobiledevice-glue
-        - -lplist
-        - -lminimuxer-ios
-        # Suppress linker warnings about version mismatches
-        - -Wl,-w
-      
-      ENABLE_BITCODE: NO
-      
-      # String Catalogs - enable symbol generation (Xcode recommendation)
-      SWIFT_EMIT_LOC_STRINGS: true
-      
-      # Disable module interface (requires BUILD_LIBRARY_FOR_DISTRIBUTION)
-      SWIFT_EMIT_MODULE_INTERFACE: false
-      BUILD_LIBRARY_FOR_DISTRIBUTION: NO
-    
-    postCompileScripts:
-      - name: Bundle Apps
-        script: |
-          set -e
-          echo "🚀 Bundle Apps Script Running..."
-          
-          APP_BUNDLE="${BUILT_PRODUCTS_DIR}/HIAHDesktop.app"
-          BUNDLED_APPS_DIR="${APP_BUNDLE}/BundledApps"
-          
-          echo "📦 Bundling apps into: ${BUNDLED_APPS_DIR}"
-          
-          # Create BundledApps directory
-          mkdir -p "${BUNDLED_APPS_DIR}"
-          
-          # Bundle HIAHTop
-          if [ -d "${SRCROOT}/src/HIAHTop" ]; then
-              mkdir -p "${BUNDLED_APPS_DIR}/HIAHTop.app"
-              cp "${SRCROOT}/src/HIAHTop/"*.m "${SRCROOT}/src/HIAHTop/"*.h "${BUNDLED_APPS_DIR}/HIAHTop.app/" 2>/dev/null || true
-              cp "${SRCROOT}/src/HIAHTop/Info.plist" "${BUNDLED_APPS_DIR}/HIAHTop.app/"
-              echo "✓ Bundled HIAHTop.app"
-          fi
-          
-          # Bundle HIAHInstaller
-          if [ -d "${SRCROOT}/src/HIAHInstaller" ]; then
-              mkdir -p "${BUNDLED_APPS_DIR}/HIAHInstaller.app"
-              cp "${SRCROOT}/src/HIAHInstaller/"*.m "${SRCROOT}/src/HIAHInstaller/"*.h "${BUNDLED_APPS_DIR}/HIAHInstaller.app/" 2>/dev/null || true
-              cp "${SRCROOT}/src/HIAHInstaller/Info.plist" "${BUNDLED_APPS_DIR}/HIAHInstaller.app/"
-              echo "✓ Bundled HIAHInstaller.app"
-          fi
-          
-          # Bundle Sample Apps
-          for app in Calculator Notes Weather Timer Canvas; do
-              if [ -d "${SRCROOT}/src/SampleApps/${app}" ]; then
-                  mkdir -p "${BUNDLED_APPS_DIR}/${app}.app"
-                  cp "${SRCROOT}/src/SampleApps/${app}/"*.swift "${BUNDLED_APPS_DIR}/${app}.app/" 2>/dev/null || true
-                  cp "${SRCROOT}/src/SampleApps/${app}/Info.plist" "${BUNDLED_APPS_DIR}/${app}.app/"
-                  echo "✓ Bundled ${app}.app"
-              fi
-          done
-          
-          # Bundle HIAHTerminal
-          if [ -d "${SRCROOT}/src/HIAHTerminal" ]; then
-              mkdir -p "${BUNDLED_APPS_DIR}/HIAHTerminal.app"
-              cp "${SRCROOT}/src/HIAHTerminal/"*.swift "${SRCROOT}/src/HIAHTerminal/"*.m "${SRCROOT}/src/HIAHTerminal/"*.h "${BUNDLED_APPS_DIR}/HIAHTerminal.app/" 2>/dev/null || true
-              cp "${SRCROOT}/src/HIAHTerminal/Info.plist" "${BUNDLED_APPS_DIR}/HIAHTerminal.app/"
-              echo "✓ Bundled HIAHTerminal.app"
-          fi
-          
-          echo "✅ Finished bundling apps!"
-        shell: /bin/bash
-        showEnvVars: false
-        runOnlyWhenInstalling: false
-        outputFiles:
-          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/HIAHTop.app"
-          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/HIAHInstaller.app"
-          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/Calculator.app"
-          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/Notes.app"
-          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/Weather.app"
-          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/Timer.app"
-          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/Canvas.app"
-          - "${BUILT_PRODUCTS_DIR}/HIAHDesktop.app/BundledApps/HIAHTerminal.app"
-        inputFiles:
-          - "${SRCROOT}/src/HIAHTop/Info.plist"
-          - "${SRCROOT}/src/HIAHInstaller/Info.plist"
-          - "${SRCROOT}/src/SampleApps/Calculator/Info.plist"
-          - "${SRCROOT}/src/SampleApps/Notes/Info.plist"
-          - "${SRCROOT}/src/SampleApps/Weather/Info.plist"
-          - "${SRCROOT}/src/SampleApps/Timer/Info.plist"
-          - "${SRCROOT}/src/SampleApps/Canvas/Info.plist"
-          - "${SRCROOT}/src/HIAHTerminal/Info.plist"
+        - $(SRCROOT)/src/HIAHKernel/Public
+        - $(SRCROOT)/src/Config
+
+  HIAHTop:
+    type: application
+    platform: iOS
+    info:
+      path: src/HIAHTop/Info.plist
+    dependencies:
+      - target: HIAHKernel
+        embed: true
+        link: true
+      - framework: UIKit.framework
+      - framework: Foundation.framework
+      - framework: CoreGraphics.framework
+    sources:
+      - path: src/HIAHTop
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.aspauldingcode.HIAHTop
+      CLANG_ENABLE_MODULES: NO
+      HEADER_SEARCH_PATHS:
+        - $(SRCROOT)/src/HIAHKernel/Public

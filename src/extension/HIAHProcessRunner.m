@@ -18,10 +18,11 @@
 #import <HIAHKernel/HIAHLogging.h>
 #import <HIAHKernel/HIAHMachOUtils.h>
 #else
-#import "../HIAHDesktop/HIAHLogging.h"
-#import "../HIAHDesktop/HIAHMachOUtils.h"
-#import "../hooks/HIAHDyldBypass.h"
-#import "../hooks/HIAHHook.h"
+// Headers from HIAHKernel (included via HEADER_SEARCH_PATHS)
+#import "HIAHLogging.h"
+#import "HIAHMachOUtils.h"
+#import "HIAHDyldBypass.h"
+#import "HIAHHook.h"
 #import "HIAHBypassStatus.h"
 #endif
 
@@ -37,6 +38,9 @@
 #import <spawn.h>
 #import <stdarg.h>
 #import <sys/sysctl.h>
+
+// App Group identifier for shared storage
+static NSString * const HIAH_APP_GROUP = @"group.com.aspauldingcode.HIAHDesktop";
 
 #pragma mark - Logging
 

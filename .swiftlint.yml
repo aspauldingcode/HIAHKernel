@@ -1,0 +1,109 @@
+# SwiftLint Configuration for HIAHKernel
+# https://github.com/realm/SwiftLint
+
+# Paths to include
+included:
+  - src
+
+# Paths to exclude
+excluded:
+  - src/Vendored
+  - src/TestSupport
+  - Tests
+  - build
+  - DerivedData
+  - .build
+
+# Enabled rules
+opt_in_rules:
+  - closure_end_indentation
+  - closure_spacing
+  - collection_alignment
+  - contains_over_filter_count
+  - contains_over_filter_is_empty
+  - contains_over_first_not_nil
+  - convenience_type
+  - empty_collection_literal
+  - empty_count
+  - empty_string
+  - fatal_error_message
+  - first_where
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+  - last_where
+  - literal_expression_end_indentation
+  - modifier_order
+  - multiline_arguments
+  - multiline_function_chains
+  - operator_usage_whitespace
+  - overridden_super_call
+  - prefer_self_type_over_type_of_self
+  - prefer_zero_over_explicit_init
+  - redundant_nil_coalescing
+  - redundant_type_annotation
+  - sorted_first_last
+  - toggle_bool
+  - trailing_closure
+  - unneeded_parentheses_in_closure_argument
+  - vertical_parameter_alignment_on_call
+  - yoda_condition
+
+# Disabled rules
+disabled_rules:
+  - line_length  # Can be too restrictive
+  - function_body_length  # Some functions are necessarily long
+  - type_body_length  # Some types are complex
+  - file_length  # Large files are sometimes necessary
+  - cyclomatic_complexity  # Complex logic is sometimes needed
+  - identifier_name  # Allow short names in some cases
+
+# Rule configurations
+line_length:
+  warning: 150
+  error: 200
+  ignores_comments: true
+  ignores_urls: true
+
+type_body_length:
+  warning: 400
+  error: 600
+
+file_length:
+  warning: 800
+  error: 1200
+
+function_body_length:
+  warning: 60
+  error: 100
+
+identifier_name:
+  min_length:
+    warning: 2
+    error: 1
+  max_length:
+    warning: 50
+    error: 60
+  excluded:
+    - i
+    - j
+    - k
+    - x
+    - y
+    - z
+    - id
+    - fd
+    - vm
+
+nesting:
+  type_level: 3
+  function_level: 3
+
+# Custom rules
+custom_rules:
+  agpl_header:
+    name: "AGPL Header Check"
+    regex: "HIAHLoginWindow"
+    match_kinds:
+      - comment
+    message: "Files in HIAHLoginWindow should have AGPL headers"
+    severity: warning

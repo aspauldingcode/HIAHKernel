@@ -4,7 +4,7 @@
  */
 
 #import "HIAHAppLauncher.h"
-#import "../HIAHDesktop/HIAHFilesystem.h"
+#import "HIAHFilesystem.h"
 #import <sys/event.h>
 #import <sys/time.h>
 #import <fcntl.h>

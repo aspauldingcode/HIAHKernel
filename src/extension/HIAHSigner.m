@@ -1,25 +1,15 @@
 #import "HIAHSigner.h"
-#import "../HIAHDesktop/HIAHLogging.h"
-#import "../HIAHDesktop/HIAHMachOUtils.h"
+// Headers from HIAHKernel (included via HEADER_SEARCH_PATHS)
+#import "HIAHLogging.h"
+#import "HIAHMachOUtils.h"
+#import "ZSigner.h"
 #import <Security/Security.h>
 #import <spawn.h>
 #import <sys/wait.h>
 
-// ZSign for programmatic signing (like LiveContainer)
-// ZSign is compiled via Nix and wrapped in ZSigner Objective-C class
-#if __has_include("../../zsign/ZSigner.h")
-#import "../../zsign/ZSigner.h"
+// ZSign is built via Nix (dependencies/deps/zsign/ios.nix) and linked
+// ZSigner.mm provides Objective-C++ wrapper around zsign C++ library
 #define HAS_ZSIGN 1
-#elif __has_include("../../../zsign/ZSigner.h")
-#import "../../../zsign/ZSigner.h"
-#define HAS_ZSIGN 1
-#elif __has_include("zsign/ZSigner.h")
-#import "zsign/ZSigner.h"
-#define HAS_ZSIGN 1
-#else
-// ZSign should be available since it's in project.yml, but if not, we'll use runtime class loading
-#define HAS_ZSIGN 0
-#endif
 
 @implementation HIAHSigner
 

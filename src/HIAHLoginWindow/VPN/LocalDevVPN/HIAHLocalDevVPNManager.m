@@ -10,7 +10,7 @@
 #import "HIAHLocalDevVPNManager.h"
 #import "../EMProxyBridge.h"
 #import "../HIAHVPNStateMachine.h"
-#import "../../../HIAHDesktop/HIAHLogging.h"
+#import "HIAHLogging.h"
 #import "../HIAHPrivateAppLauncher.h"
 #import <UIKit/UIKit.h>
 #import <Network/Network.h>

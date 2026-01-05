@@ -48,6 +48,7 @@ class HIAHCertificateManager {
     // MARK: - Certificate Management
     
     /// Fetch or create a signing certificate
+    /// This method follows SideStore's pattern: check cache first, validate with server, only create if needed
     func fetchCertificate() async throws -> ALTCertificate {
         guard HIAHAccountManager.shared.account != nil,
               let team = HIAHAccountManager.shared.team,
@@ -57,26 +58,46 @@ class HIAHCertificateManager {
         
         print("[Certificate] Fetching certificate for team: \(team.name)")
         
-        // Fetch existing certificates
+        // Step 1: Check if we have a cached certificate
+        if let cachedCert = loadCachedCertificate() {
+            print("[Certificate] Found cached certificate: \(cachedCert.serialNumber)")
+            
+            // Step 2: Validate cached certificate is still valid on server
+            do {
+                let existingCerts = try await ALTAppleAPI.shared.fetchCertificates(for: team, session: session)
+                
+                // Check if our cached certificate is still valid on the server
+                if existingCerts.contains(where: { $0.serialNumber == cachedCert.serialNumber }) {
+                    print("[Certificate] ✅ Cached certificate is still valid - reusing it")
+                    self.certificate = cachedCert
+                    return cachedCert
+                } else {
+                    print("[Certificate] ⚠️ Cached certificate was revoked on server - will create new one")
+                    // Certificate was revoked - clear cache and continue to create new one
+                    clearCachedCertificate()
+                }
+            } catch {
+                print("[Certificate] ⚠️ Failed to validate cached certificate: \(error) - will create new one")
+                // If validation fails, clear cache and try to create new one
+                clearCachedCertificate()
+            }
+        }
+        
+        // Step 3: Fetch existing certificates from server
         let existingCerts = try await ALTAppleAPI.shared.fetchCertificates(for: team, session: session)
         
-        // Look for a certificate we created (by machine name)
+        // Step 4: Look for a certificate we created (by machine name)
         let machineName = await "HIAH-\(UIDevice.current.name)"
         if let existingCert = existingCerts.first(where: { $0.machineName == machineName }) {
-            print("[Certificate] Found existing certificate: \(existingCert.serialNumber)")
+            print("[Certificate] Found existing certificate on server: \(existingCert.serialNumber)")
             
-            // Load private key from keychain if we have it
-            if let cachedCert = loadCachedCertificate(), cachedCert.serialNumber == existingCert.serialNumber {
-                self.certificate = cachedCert
-                return cachedCert
-            }
-            
-            // We found a cert but don't have the private key - need to revoke and recreate
-            print("[Certificate] Don't have private key for existing cert - revoking...")
+            // We found a cert on server but don't have it cached - this shouldn't happen,
+            // but if it does, we can't use it without the private key
+            print("[Certificate] ⚠️ Certificate exists on server but not in cache - revoking to create fresh one")
             try await ALTAppleAPI.shared.revokeCertificate(existingCert, for: team, session: session)
         }
         
-        // Check if we're at the certificate limit (2 for free accounts)
+        // Step 5: Check if we're at the certificate limit (2 for free accounts)
         if existingCerts.count >= 2 {
             print("[Certificate] At certificate limit - revoking oldest...")
             if let oldestCert = existingCerts.last {
@@ -84,11 +105,11 @@ class HIAHCertificateManager {
             }
         }
         
-        // Create new certificate
+        // Step 6: Create new certificate (only if we don't have a valid cached one)
         print("[Certificate] Creating new certificate...")
         let newCert = try await ALTAppleAPI.shared.addCertificate(machineName: machineName, to: team, session: session)
         
-        // Cache the certificate
+        // Step 7: Cache the certificate
         saveCertificate(newCert)
         self.certificate = newCert
         

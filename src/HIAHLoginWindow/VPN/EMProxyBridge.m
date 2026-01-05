@@ -12,7 +12,7 @@
  */
 
 #import "EMProxyBridge.h"
-#import "../../HIAHDesktop/HIAHLogging.h"
+#import "HIAHLogging.h"
 
 // em_proxy C API from the linked static library
 // These functions are defined in em_proxy.h and implemented in libem_proxy-*.a

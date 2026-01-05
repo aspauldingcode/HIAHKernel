@@ -1,5 +1,0 @@
-*.xcodeproj
-*.xcworkspace
-Tests/
-.github/
-.gitmodules

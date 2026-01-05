@@ -12,7 +12,7 @@
 
 #import "HIAHVPNManager.h"
 #import "LocalDevVPN/HIAHLocalDevVPNManager.h"
-#import "../../HIAHDesktop/HIAHLogging.h"
+#import "HIAHLogging.h"
 #import <Foundation/Foundation.h>
 
 @interface HIAHVPNManager ()

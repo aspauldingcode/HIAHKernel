@@ -13,7 +13,7 @@
 #import "HIAHLocalDevVPNSetupViewController.h"
 #import "HIAHLocalDevVPNManager.h"
 #import "HIAHVPNStateMachine.h"
-#import "../../../HIAHDesktop/HIAHLogging.h"
+#import "HIAHLogging.h"
 #import "../HIAHPrivateAppLauncher.h"
 #import <UIKit/UIKit.h>
 

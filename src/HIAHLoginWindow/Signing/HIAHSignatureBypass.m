@@ -15,7 +15,7 @@
 #import "../VPN/HIAHVPNManager.h"
 #import "../VPN/HIAHVPNStateMachine.h"
 #import "../JIT/HIAHJITManager.h"
-#import "../../HIAHDesktop/HIAHLogging.h"
+#import "HIAHLogging.h"
 #import "../../extension/HIAHSigner.h"
 #import <sys/sysctl.h>
 

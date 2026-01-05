@@ -9,7 +9,7 @@
 
 #import "HIAHJITManager.h"
 #import "HIAHJITEnablerHelper.h"
-#import "../../HIAHDesktop/HIAHLogging.h"
+#import "HIAHLogging.h"
 #import "../VPN/HIAHVPNManager.h"
 #import "../VPN/MinimuxerBridge.h"
 #import <Foundation/Foundation.h>

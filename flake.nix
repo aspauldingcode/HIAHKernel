@@ -670,28 +670,38 @@ ENTEOF
                 echo "❌ Failed to build xcodegen-project"
                 exit 1
               }
+
+              # Create DONOTTRACK directory if it doesn't exist
+              mkdir -p DONOTTRACK
               
               if [ -d "./result-xcgen/HIAHDesktop.xcodeproj" ]; then
-                # Remove old project if exists (make writable first since Nix copies are read-only)
+                # Clean up old files in DONOTTRACK
+                rm -rf DONOTTRACK/HIAHDesktop.xcodeproj
+                rm -f DONOTTRACK/project.yml
+
+                # Also ensure root is clean if user hasn't cleaned it yet
                 if [ -d "HIAHDesktop.xcodeproj" ]; then
-                  chmod -R +w HIAHDesktop.xcodeproj 2>/dev/null || true
-                  rm -rf HIAHDesktop.xcodeproj
+                   echo "🧹 Cleaning up root HIAHDesktop.xcodeproj..."
+                   rm -rf HIAHDesktop.xcodeproj
                 fi
                 if [ -f "project.yml" ]; then
-                  chmod +w project.yml 2>/dev/null || true
-                  rm -f project.yml
+                   echo "🧹 Cleaning up root project.yml..."
+                   rm -f project.yml
                 fi
                 
-                # Copy generated project
-                cp -r ./result-xcgen/HIAHDesktop.xcodeproj .
-                # Make writable so it can be removed/edited later
-                chmod -R +w HIAHDesktop.xcodeproj
+                # Copy generated project to DONOTTRACK
+                cp -r ./result-xcgen/HIAHDesktop.xcodeproj DONOTTRACK/
+                chmod -R +w DONOTTRACK/HIAHDesktop.xcodeproj
                 
-                # Copy project.yml for reference
+                # Copy project.yml to DONOTTRACK
                 if [ -f "./result-xcgen/project.yml" ]; then
-                  cp ./result-xcgen/project.yml .
-                  chmod +w project.yml
+                  cp ./result-xcgen/project.yml DONOTTRACK/
+                  chmod +w DONOTTRACK/project.yml
                 fi
+
+                # Copy generated Info.plist files to DONOTTRACK
+                cp ./result-xcgen/*.plist DONOTTRACK/
+                chmod +w DONOTTRACK/*.plist
                 
                 # Clean up symlink
                 rm -rf ./result-xcgen
@@ -699,12 +709,12 @@ ENTEOF
                 echo ""
                 echo "✅ Xcode project generated successfully!"
                 echo ""
-                echo "📂 Generated files:"
+                echo "📂 Generated files in ./DONOTTRACK/:"
                 echo "   - HIAHDesktop.xcodeproj"
                 echo "   - project.yml (with Nix store paths embedded)"
                 echo ""
                 echo "📝 Next steps:"
-                echo "   1. Open HIAHDesktop.xcodeproj in Xcode"
+                echo "   1. Open ./DONOTTRACK/HIAHDesktop.xcodeproj in Xcode"
                 echo "   2. Build the project (⌘B)"
                 echo ""
                 echo "💡 Dependencies are linked from the Nix store."

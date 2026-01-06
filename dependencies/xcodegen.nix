@@ -71,6 +71,151 @@ let
     libusbmuxd = libusbmuxd;
   };
 
+  # ============================================================================
+  # Embedded Info.plist content
+  # ============================================================================
+
+  infoPlistDesktop = ''
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>$(DEVELOPMENT_LANGUAGE)</string>
+            <key>CFBundleDisplayName</key>
+            <string>HIAH Desktop</string>
+            <key>CFBundleExecutable</key>
+            <string>$(EXECUTABLE_NAME)</string>
+            <key>CFBundleIdentifier</key>
+            <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>HIAH Desktop</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>1.0</string>
+            <key>CFBundleVersion</key>
+            <string>1</string>
+            <key>LSSupportsOpeningDocumentsInPlace</key>
+            <true/>
+            <key>MinimumOSVersion</key>
+            <string>16.0</string>
+            <key>UIApplicationSceneManifest</key>
+            <dict>
+                    <key>UIApplicationSupportsMultipleScenes</key>
+                    <false/>
+                    <key>UISceneConfigurations</key>
+                    <dict>
+                            <key>UIWindowSceneSessionRoleApplication</key>
+                            <array>
+                                    <dict>
+                                            <key>UISceneConfigurationName</key>
+                                            <string>Default Configuration</string>
+                                            <key>UISceneDelegateClassName</key>
+                                            <string>SceneDelegate</string>
+                                    </dict>
+                            </array>
+                    </dict>
+            </dict>
+            <key>UIFileSharingEnabled</key>
+            <true/>
+            <key>UILaunchScreen</key>
+            <dict/>
+            <key>UISupportedInterfaceOrientations</key>
+            <array>
+                    <string>UIInterfaceOrientationPortrait</string>
+                    <string>UIInterfaceOrientationLandscapeLeft</string>
+                    <string>UIInterfaceOrientationLandscapeRight</string>
+            </array>
+    </dict>
+    </plist>
+  '';
+
+  # FORCE_NIX_REBUILD_TIMESTAMP_2026_01_06
+  infoPlistExtension = ''
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>$(DEVELOPMENT_LANGUAGE)</string>
+            <key>CFBundleExecutable</key>
+            <string>$(EXECUTABLE_NAME)</string>
+            <key>CFBundleIdentifier</key>
+            <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>$(PRODUCT_NAME)</string>
+            <key>CFBundlePackageType</key>
+            <string>XPC!</string>
+            <key>CFBundleShortVersionString</key>
+            <string>1.0</string>
+            <key>CFBundleVersion</key>
+            <string>1</string>
+            <key>MinimumOSVersion</key>
+            <string>16.0</string>
+            <key>NSExtension</key>
+            <dict>
+                    <key>NSExtensionAttributes</key>
+                    <dict>
+                            <key>AllowBackgroundExecution</key>
+                            <true/>
+                    </dict>
+                    <key>NSExtensionPointIdentifier</key>
+                    <string>com.apple.process-runner</string>
+                    <key>NSExtensionPrincipalClass</key>
+                    <string>HIAHExtensionHandler</string>
+            </dict>
+    </dict>
+    </plist>
+  '';
+
+  infoPlistTop = ''
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+        <key>CFBundleExecutable</key>
+        <string>HIAHTop</string>
+        <key>CFBundleIdentifier</key>
+        <string>com.aspauldingcode.HIAHTop</string>
+        <key>CFBundleName</key>
+        <string>HIAHTop</string>
+        <key>CFBundleDisplayName</key>
+        <string>HIAH Top</string>
+        <key>CFBundleVersion</key>
+        <string>1.0</string>
+        <key>CFBundleShortVersionString</key>
+        <string>1.0</string>
+        <key>CFBundlePackageType</key>
+        <string>APPL</string>
+        <key>LSRequiresIPhoneOS</key>
+        <true/>
+        <key>UILaunchStoryboardName</key>
+        <string>LaunchScreen</string>
+        <key>UISupportedInterfaceOrientations</key>
+        <array>
+            <string>UIInterfaceOrientationPortrait</string>
+            <string>UIInterfaceOrientationLandscapeLeft</string>
+            <string>UIInterfaceOrientationLandscapeRight</string>
+        </array>
+        <key>UIStatusBarStyle</key>
+        <string>UIStatusBarStyleLightContent</string>
+        <key>UIViewControllerBasedStatusBarAppearance</key>
+        <false/>
+        <key>MinimumOSVersion</key>
+        <string>15.0</string>
+        <key>UIApplicationSupportsIndirectInputEvents</key>
+        <true/>
+        <key>NSPrincipalClass</key>
+        <string>HIAHTopViewController</string>
+    </dict>
+    </plist>
+  '';
+
   # Generate project.yml content with all Nix store paths embedded
   projectYaml = ''
 name: HIAHDesktop
@@ -159,14 +304,14 @@ targets:
     type: framework
     platform: iOS
     info:
-      path: src/HIAHKernel/Info.plist
+      path: ../src/HIAHKernel/Info.plist
     dependencies:
-      - framework: Security.framework
-      - framework: Foundation.framework
+      - sdk: Security.framework
+      - sdk: Foundation.framework
     sources:
-      - path: src/HIAHKernel/Public
+      - path: ../src/HIAHKernel/Public
         headerVisibility: public
-      - path: src/HIAHKernel/Core
+      - path: ../src/HIAHKernel/Core
         headerVisibility: project
     settings:
       PRODUCT_NAME: HIAHKernel
@@ -177,12 +322,12 @@ targets:
       CLANG_ENABLE_MODULES: NO
       CLANG_CXX_LANGUAGE_STANDARD: c++17
       HEADER_SEARCH_PATHS:
-        - $(SRCROOT)/src/HIAHKernel/Public
-        - $(SRCROOT)/src/HIAHKernel/Core
-        - $(SRCROOT)/src/HIAHKernel/Core/Hooks
-        - $(SRCROOT)/src/HIAHKernel/Core/Logging
-        - $(SRCROOT)/src/HIAHKernel/Core/Utils
-        - $(SRCROOT)/src/HIAHKernel/Core/Signing
+        - $(SRCROOT)/../src/HIAHKernel/Public
+        - $(SRCROOT)/../src/HIAHKernel/Core
+        - $(SRCROOT)/../src/HIAHKernel/Core/Hooks
+        - $(SRCROOT)/../src/HIAHKernel/Core/Logging
+        - $(SRCROOT)/../src/HIAHKernel/Core/Utils
+        - $(SRCROOT)/../src/HIAHKernel/Core/Signing
         - ${openssl.ios-sim}/include
         - ${zsign.ios-sim}/include
         - ${zsign.ios-sim}/include/zsign
@@ -202,40 +347,40 @@ targets:
         - -lzsign
         - -lssl
         - -lcrypto
-        - -lc++
 
   HIAHProcessRunner:
     type: app-extension
     platform: iOS
     info:
-      path: src/extension/Info.plist
+      path: Info_Extension.plist
     dependencies:
       - target: HIAHKernel
         embed: false
         link: true
-      - framework: Security.framework
-      - framework: Foundation.framework
+      - sdk: Security.framework
+      - sdk: Foundation.framework
     sources:
-      - path: src/extension
+      - path: ../src/extension
         excludes:
           - "*.plist"
-      - path: src/HIAHKernel/Public
-      - path: src/HIAHKernel/Core
-      - path: src/TestSupport
+      - path: ../src/HIAHKernel/Public
+      - path: ../src/HIAHKernel/Core
+      - path: ../src/TestSupport
     settings:
+      PRODUCT_NAME: HIAHProcessRunner
       PRODUCT_BUNDLE_IDENTIFIER: com.aspauldingcode.HIAHDesktop.HIAHProcessRunner
       ENABLE_BITCODE: NO
-      CODE_SIGN_ENTITLEMENTS: src/extension/Entitlements.plist
+      CODE_SIGN_ENTITLEMENTS: ../src/extension/Entitlements.plist
       CLANG_ENABLE_MODULES: NO
       CLANG_CXX_LANGUAGE_STANDARD: c++17
       HEADER_SEARCH_PATHS:
-        - $(SRCROOT)/src/HIAHKernel/Public
-        - $(SRCROOT)/src/HIAHKernel/Core
-        - $(SRCROOT)/src/HIAHKernel/Core/Hooks
-        - $(SRCROOT)/src/HIAHKernel/Core/Signing
-        - $(SRCROOT)/src/HIAHKernel/Core/Utils
-        - $(SRCROOT)/src/HIAHKernel/Core/Logging
-        - $(SRCROOT)/src/TestSupport
+        - $(SRCROOT)/../src/HIAHKernel/Public
+        - $(SRCROOT)/../src/HIAHKernel/Core
+        - $(SRCROOT)/../src/HIAHKernel/Core/Hooks
+        - $(SRCROOT)/../src/HIAHKernel/Core/Signing
+        - $(SRCROOT)/../src/HIAHKernel/Core/Utils
+        - $(SRCROOT)/../src/HIAHKernel/Core/Logging
+        - $(SRCROOT)/../src/TestSupport
         - ${zsign.ios-sim}/include
         - ${zsign.ios-sim}/include/zsign
         - ${zsign.ios-sim}/include/zsign/common
@@ -247,55 +392,58 @@ targets:
         - -lzsign
         - -lssl
         - -lcrypto
-        - -lc++
 
   HIAHDesktop:
     type: application
     platform: iOS
     info:
-      path: src/HIAHDesktop/Info.plist
+      path: Info_HIAHDesktop.plist
     dependencies:
       - target: HIAHKernel
         embed: true
         link: true
       - target: HIAHProcessRunner
         embed: true
-      - framework: UIKit.framework
-      - framework: Foundation.framework
-      - framework: CoreGraphics.framework
+      - sdk: UIKit.framework
+      - sdk: Foundation.framework
+      - sdk: CoreGraphics.framework
     sources:
-      - path: src/HIAHDesktop
-      - path: src/Config
+      - path: ../src/HIAHDesktop
+      - path: ../src/Config
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.aspauldingcode.HIAHDesktop
-      CODE_SIGN_ENTITLEMENTS: src/HIAHDesktop/HIAHDesktop.entitlements
+      CODE_SIGN_ENTITLEMENTS: ../src/HIAHDesktop/HIAHDesktop.entitlements
       CLANG_ENABLE_MODULES: NO
       HEADER_SEARCH_PATHS:
-        - $(SRCROOT)/src/HIAHKernel/Public
-        - $(SRCROOT)/src/Config
+        - $(SRCROOT)/../src/HIAHKernel/Public
+        - $(SRCROOT)/../src/Config
 
   HIAHTop:
     type: application
     platform: iOS
     info:
-      path: src/HIAHTop/Info.plist
+      path: Info_HIAHTop.plist
     dependencies:
       - target: HIAHKernel
         embed: true
         link: true
-      - framework: UIKit.framework
-      - framework: Foundation.framework
-      - framework: CoreGraphics.framework
+      - sdk: UIKit.framework
+      - sdk: Foundation.framework
+      - sdk: CoreGraphics.framework
     sources:
-      - path: src/HIAHTop
+      - path: ../src/HIAHTop
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.aspauldingcode.HIAHTop
       CLANG_ENABLE_MODULES: NO
       HEADER_SEARCH_PATHS:
-        - $(SRCROOT)/src/HIAHKernel/Public
+        - $(SRCROOT)/../src/HIAHKernel/Public
   '';
 
   projectYamlFile = pkgs.writeText "project.yml" projectYaml;
+  
+  infoPlistDesktopFile = pkgs.writeText "Info_HIAHDesktop.plist" infoPlistDesktop;
+  infoPlistExtensionFile = pkgs.writeText "Info_Extension.plist" infoPlistExtension;
+  infoPlistTopFile = pkgs.writeText "Info_HIAHTop.plist" infoPlistTop;
 
 in pkgs.stdenv.mkDerivation {
   pname = "HIAHDesktopXcodeProject";
@@ -327,6 +475,9 @@ in pkgs.stdenv.mkDerivation {
     echo ""
     
     cp ${projectYamlFile} project.yml
+    cp ${infoPlistDesktopFile} Info_HIAHDesktop.plist
+    cp ${infoPlistExtensionFile} Info_Extension.plist
+    cp ${infoPlistTopFile} Info_HIAHTop.plist
     
     runHook postBuild
   '';
@@ -338,11 +489,31 @@ in pkgs.stdenv.mkDerivation {
     export HOME="$TMPDIR"
     export USER="nobody"
     
-    echo "📦 Running XcodeGen..."
-    ${pkgs.xcodegen}/bin/xcodegen generate --spec project.yml
+    export USER="nobody"
+
+
     
     mkdir -p $out
+    
+    # We need to simulate the DONOTTRACK directory structure
+    # The source is at $src, so we need to be in a subdirectory to use ../src paths
+    mkdir -p DONOTTRACK
+    cp project.yml DONOTTRACK/
+    cp Info*.plist DONOTTRACK/
+    cd DONOTTRACK
+    
+    echo "📦 Running XcodeGen..."
+    # xcodegen needs to find source files at ../src
+    # In the build sandbox, $src is the root of the source
+    # We are in ./DONOTTRACK, so ../src works if we symlink or if the sandbox allows
+    
+    # Actually, we need to link the source because we are in a sandbox
+    ln -s $src ../src
+    
+    ${pkgs.xcodegen}/bin/xcodegen generate --spec project.yml
+    
     cp project.yml $out/
+    cp *.plist $out/
     
     if [ -d "HIAHDesktop.xcodeproj" ]; then
       cp -r HIAHDesktop.xcodeproj $out/

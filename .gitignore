@@ -5,9 +5,9 @@
 *.xcuserstate
 DerivedData/
 
-# XcodeGen generated files (source of truth is project.yml)
-src/HIAHDesktop/Info.plist
-src/extension/Info.plist
+
+# Generated Build Directory
+DONOTTRACK/
 
 # Nix
 result
@@ -43,6 +43,8 @@ build/
 source0/
 source1/
 source2/
+source3/
+source4/
 
 # IDE
 .vscode/
@@ -57,4 +59,3 @@ source2/
 *.temp
 *.bak
 *.snippet
-
